@@ -30,7 +30,7 @@ def apply_transformations(df, feature_name, method):
     df[feature_name] = df[feature_name].astype(float)
     
     if method == 'Binary':
-        # Only apply the _TF transformation if binary
+        # Only apply the _noTF transformation if binary
         return df[feature_name]
     else:
         # Apply all transformations if continuous
