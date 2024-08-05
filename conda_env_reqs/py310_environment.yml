@@ -146,6 +146,7 @@ dependencies:
       - argh==0.31.3
       - bcbio-gff==0.7.1
       - gffutils==0.13
+      - networkx==3.3
       - pyfaidx==0.8.1.1
       - simplejson==3.19.2
 prefix: /home/seguraab/miniconda3/envs/py310
