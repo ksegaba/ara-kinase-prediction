@@ -1,2 +1,3 @@
 # Directories to ignore
 data/
+code/.ipynb_checkpoints/
