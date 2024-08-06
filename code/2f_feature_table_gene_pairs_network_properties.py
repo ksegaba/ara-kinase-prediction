@@ -43,7 +43,7 @@ def calculate_feature_values(df, gene_pairs, feature_type):
                                   column names are the same as the column names 
                                   in df.
     '''
-    #
+    
     # Create feature values for continuous feature types
     if feature_type == 'continuous':
         G = nx.from_pandas_adjacency(df) # make graph
@@ -78,13 +78,13 @@ def calculate_feature_values(df, gene_pairs, feature_type):
             # Determine if the two genes have the same annotation/property
             try:
                 features.append(df.loc[gene1].eq(df.loc[gene2]).astype('int'))
-        #
+        
             except KeyError:
                 # At least one gene identifier is not in the network
                 features.append(pd.Series(np.nan, index=np.arange(len(df.columns))))
-        #
+        
         return pd.concat([gene_pairs, pd.concat(features, axis=1).T], axis=1)
-    #
+    
     else:
         raise ValueError('Feature type must be either "continuous" or "binary".')
 
@@ -102,7 +102,7 @@ def apply_transformations(df):
         - Squared
     '''
     df_list = []
-    #
+    
     # Apply the transformations to individual columns
     for column in df.columns:
         if column in ['# overlapping', '% overlapping', 'Total #']:
@@ -149,7 +149,7 @@ def assign_feature_column_names(df, feature_name):
     col_names = {} # column name mapping
     col_to_drop = [] # columns to drop
     subset = checklist[checklist['NEW Feature name'] == feature_name]
-    #
+    
     if feature_name in ['aranet', 'ppi']:
         # Determine the new column names for df
         for col in df.columns:
@@ -183,9 +183,9 @@ def assign_feature_column_names(df, feature_name):
                         (subset['Calculation for gene pair'] == col)
                         & (subset['Transformation'].isna()),
                         'ML model feature name'].values[0]
-                #
+                
                 col_names[col] = new_col
-                #
+                
             else:
                 col_names[col] = col
         
@@ -195,13 +195,13 @@ def assign_feature_column_names(df, feature_name):
                 new_col = subset['ML model feature name'].\
                     loc[subset['ML model feature name'].str.contains(col)].values[0]
                 col_names[col] = new_col
-            #
+            
             except IndexError:
                 if col in ['gene1', 'gene2']:
                     col_names[col] = col
                 else:
                     col_to_drop.append(col)
-    #
+    
     return col_names, col_to_drop
 
 
@@ -219,44 +219,44 @@ for feature_name in checklist['NEW Feature name'].unique():
         print("Creating the AraNet features...")
         adj_mat = dt.fread('../data/Features/network_properties_single_genes_aranet_adjacency_matrix.csv.gz').to_pandas()
         adj_mat.set_index('gene', inplace=True)
-        #
+        
         aranet_features = calculate_feature_values(adj_mat, gene_pairs, 'continuous') # calculate continuous feature values
         aranet_features = apply_transformations(aranet_features) # apply transformations
         col_map, col_to_drop = assign_feature_column_names(aranet_features, 'aranet') # get column names from the checklist file
         aranet_features.rename(columns=col_map, inplace=True) # rename the columns according to mapping
-        #
+        
         if len(col_to_drop) > 0: # drop columns that are not in the checklist file
             aranet_features.drop(columns=col_to_drop, inplace=True)
-        #
+        
         del adj_mat, col_map, col_to_drop
     #
     if feature_name == 'all clust':
         print("Creating the co-expression features...")
         co_expr = dt.fread('../data/Features/network_properties_single_genes_co_expression_clusters.csv').to_pandas()
         co_expr.set_index('gene', inplace=True)
-        #
+        
         co_expr_features = calculate_feature_values(co_expr, gene_pairs, 'binary') # calculate binary feature values
         col_map, col_to_drop = assign_feature_column_names(co_expr_features, 'all clust') # get column names from the checklist file
         co_expr_features.rename(columns=col_map, inplace=True) # rename the columns according to mapping
-        #
+        
         if len(col_to_drop) > 0: # drop columns that are not in the checklist file
             co_expr_features.drop(columns=col_to_drop, inplace=True)
-        #
+        
         del co_expr, col_map, col_to_drop
     #
     if feature_name == 'ppi':
         print("Creating the PPI features...")
         adj_mat = dt.fread('../data/Features/network_properties_single_genes_ppi_adjacency_matrix.csv.gz').to_pandas()
         adj_mat.set_index('gene', inplace=True)
-        #
+        
         ppi_features = calculate_feature_values(adj_mat, gene_pairs, 'continuous') # calculate continuous feature values
         ppi_features = apply_transformations(ppi_features) # apply transformations
         col_map, col_to_drop = assign_feature_column_names(ppi_features, 'ppi') # get column names from the checklist file
         ppi_features.rename(columns=col_map, inplace=True) # rename the columns according to mapping
-        #
+        
         if len(col_to_drop) > 0: # drop columns that are not in the checklist file
             ppi_features.drop(columns=col_to_drop, inplace=True)
-        #
+        
         del adj_mat, col_map
 
 # %%
