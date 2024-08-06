@@ -6,8 +6,6 @@ import pandas as pd
 import os
 import math
 
-__author__ = 'Jingyao Tang'
-
 # Function to determine the pairing value
 # Function to determine the pairing value
 def determine_pair_value(gene1: str, gene2: str , gene_dict: str,action: str = "None") -> float:
@@ -24,8 +22,23 @@ def determine_pair_value(gene1: str, gene2: str , gene_dict: str,action: str = "
     """
     in_gene1 = gene_dict.get(gene1, None)
     in_gene2 = gene_dict.get(gene2, None)
+    
     value = 0
-    if in_gene1 == 1 and in_gene2 == 1:
+    
+    # the case where values are not numeric or are missing
+    try:
+        in_gene1 = float(in_gene1)
+    except (TypeError, ValueError):
+        in_gene1 = math.nan
+    try:
+        in_gene2 = float(in_gene2)
+    except (TypeError, ValueError):
+        in_gene2 = math.nan
+    
+    
+    if math.isnan(in_gene1) or math.isnan(in_gene2):
+        value = math.nan
+    elif in_gene1 == 1 and in_gene2 == 1:
         value = 2
     elif in_gene1 == 1 or in_gene2 == 1:
         value = 1
@@ -37,12 +50,15 @@ def determine_pair_value(gene1: str, gene2: str , gene_dict: str,action: str = "
     elif action == 'noTF':
         Calculated_value = value
     elif action == 'reciprocal':
-        if value ==0:
+        if value ==0 or math.isnan(value):
             Calculated_value = math.nan
         else:
             Calculated_value = 1/value
     else:
-        Calculated_value = value**2
+        if math.isnan(value):
+            Calculated_value = math.nan
+        else:
+            Calculated_value = value**2
     return Calculated_value
 
 print("Script started")
