@@ -1,8 +1,7 @@
 # Directories to ignore
 data/
 code/.ipynb_checkpoints/
-code/utils_py2/Python-2.7.18/
-code/utils_py2/utils_py2_env/
+code/utils_py2/
 external_software/
 
 # Files to ignore
