@@ -8,11 +8,11 @@ First: Query Arabidopsis thaliana protein sequences with BLASTp against 4 specie
   - Glycine max
   - Solanum lycopersicum
 
-Second: 
-  - Generate protein sequence alignments with MUSCLE from BLASTp results
-  - Generate nucleotide coding sequence alignments with MUSCLE
+Second: Generate protein sequence alignments with MUSCLE from BLASTp results
 
-Third: Build gene trees from the coding sequence alignments with RAxML
+Third:
+  - Back translate MUSCLE alignments to nucleotide coding sequence alignments
+  - Build gene trees from the coding sequence alignments with RAxML
 
 Fourth:
   - Calculate the evolutionary rate (Ka/Ks) for each gene with PAML
@@ -174,5 +174,11 @@ align_seqs "${data_path}/0_blast_res/blastp_TAIR10_top_hits_all.txt" \
 
 ################## Third. Gene Trees with RAxML #####################
 # Back translate protein sequence alignments to nucleotide sequence Alignments
+conda activate py310
 
+muscle_res=/home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/1_muscle_res
+python /home/seguraab/ara-kinase-prediction/code/2b_1_back_translate_alignment.py -dir $muscle_res
 
+conda deactivate
+
+# Build gene trees with RAxML
