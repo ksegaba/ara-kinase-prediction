@@ -38,7 +38,7 @@ run_blastp() {
 
   # Run BLASTp
   diamond prepdb -d ${db_path}/${out_db}
-  diamond blastp --threads 4 --query ${At_p}/Athaliana_167_TAIR10.protein.fa \
+  diamond blastp --threads 4 --query ${At_p}/protein.faa \
     --db ${db_path}/${out_db} \
     --max-target-seqs 1 --max-hsps 1 --evalue 1e-6 --no-parse-seqids \
     --outfmt 6 qseqid stitle qlen slen qstart qend sstart send length evalue bitscore pident \
@@ -54,18 +54,18 @@ run_blastp() {
 }
 
 # Paths to the protein FASTA files for each species
-At_p=/home/seguraab/ara-kinase-prediction/data/TAIR10
+At_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000001735.4
 Tc_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000208745.1
 Gm_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000004515.6
 Sl_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000188115.5
 Pt_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000002775.5
 
 # Create a BLAST database of protein sequences for A. thaliana (for the reciprocal BLASTp)
-makeblastdb -in ${At_p}/Athaliana_167_TAIR10.protein.fa \
+makeblastdb -in ${At_p}/protein.faa \
   -out ${At_p}/Athaliana_db -dbtype prot -title "A. Thaliana Protein Sequences"
 
 # Run the BLASTp and the reciprocal BLASTp searches for each subject species
-out_path=/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/evolutionary_properties_data/0_blast_res
+out_path=/home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/0_blast_res
 run_blastp $Tc_p "protein.faa" "Tcacao_db" $out_path "TAIR10_Tcacao"
 run_blastp $Gm_p "protein.faa" "Gmax_db" $out_path "TAIR10_Gmax"
 run_blastp $Sl_p "protein.faa" "Slycopersicum_db" $out_path "TAIR10_Slycopersicum"
@@ -113,27 +113,27 @@ align_seqs() {
     read -r at_gene s_gene1 s_gene2 s_gene3 s_gene4 <<< $line # gene set
 
     # Extract the A. thaliana sequences from the FASTA file
-    grep -A 1 $at_gene $At_fasta >> ${save_prefix}_gene_pair_protein.fasta
+    grep -A 1 $at_gene $At_fasta >> ${save_prefix}_${at_gene}_gene_protein.fasta
     
     # Extract the subject species sequences from the FASTA file
     if [[ $s_gene1 != "NA" ]]; then
-      grep -A 1 $s_gene1 $s_fasta1 >> ${save_prefix}_gene_pair_protein.fasta
+      grep -A 1 $s_gene1 $s_fasta1 >> ${save_prefix}_${at_gene}_gene_protein.fasta
     fi
     if [[ $s_gene2 != "NA" ]]; then
-      grep -A 1 $s_gene2 $s_fasta2 >> ${save_prefix}_gene_pair_protein.fasta
+      grep -A 1 $s_gene2 $s_fasta2 >> ${save_prefix}_${at_gene}_gene_protein.fasta
     fi
     if [[ $s_gene3 != "NA" ]]; then
-      grep -A 1 $s_gene3 $s_fasta3 >> ${save_prefix}_gene_pair_protein.fasta
+      grep -A 1 $s_gene3 $s_fasta3 >> ${save_prefix}_${at_gene}_gene_protein.fasta
     fi
     if [[ $s_gene4 != "NA" ]]; then
-      grep -A 1 $s_gene4 $s_fasta4 >> ${save_prefix}_gene_pair_protein.fasta
+      grep -A 1 $s_gene4 $s_fasta4 >> ${save_prefix}_${at_gene}_gene_protein.fasta
     fi
   
     ## Align the protein sequences
-    muscle -align $save_prefix'_gene_pair_protein.fasta' \
+    muscle -align ${save_prefix}_${at_gene}'_gene_protein.fasta' \
       -output ${save_prefix}_${at_gene}_alignment.fasta
     
-    rm ${save_prefix}_gene_pair_protein.fasta # delete the gene pair FASTA file
+    # rm ${save_prefix}_${at_gene}_gene_protein.fasta # delete the gene pair FASTA file
 
     # Update progress bar
     progress=$((progress + 1))
@@ -144,7 +144,7 @@ align_seqs() {
 
 
 # Paths to the protein FASTA files for each species
-At_p=/home/seguraab/ara-kinase-prediction/data/TAIR10/Athaliana_167_TAIR10.protein.fa
+At_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000001735.4/protein.faa
 Tc_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000208745.1/protein.faa
 Gm_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000004515.6/protein.faa
 Sl_p=/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000188115.5/protein.faa
@@ -182,3 +182,25 @@ python /home/seguraab/ara-kinase-prediction/code/2b_1_back_translate_alignment.p
 conda deactivate
 
 # Build gene trees with RAxML
+mkdir /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/2_raxml_res
+cd /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/2_raxml_res
+
+# Progress bar
+total=$(cat $gene_file | wc -l)
+progress=0
+
+seed=1
+for file in $muscle_res/cds_alignments/*
+do
+  # Output file name
+  save=$(sed 's/_cds_aligned.fasta/_gene_tree/g' <<< $file)
+  save=$(basename $save)
+
+  # Build the gene tree
+  raxmlHPC-PTHREADS -s $file -n $save -f a -x $seed -p $seed -N 1000 -m PROTGAMMAAUTO -T 4
+  seed=$((seed + 1))
+
+  # Update progress bar
+  progress=$((progress + 1))
+  echo -ne "Progress: $progress/$total\r"
+done
