@@ -289,5 +289,6 @@ if __name__ == '__main__':
 
 	# Align peptide sequence alignment to nucleotide coding sequences
 	for file in pep_files:
-		cds_out = file.split('_alignment.fasta')[0]
-		get_cds_align('../' + file, cds_out)
+		if file != 'cds_alignments': # skip the directory name
+			cds_out = file.split('_alignment.fasta')[0]
+			get_cds_align('../' + file, cds_out)
