@@ -7,7 +7,9 @@ The code is adapted from the original code written by Dr. Shin-Han Shiu
 (AlnUtility.py, Translation.py, and FastaManager.py)
 '''
 
-import argparse, os, re
+__author__ = 'Kenia Segura Abá'
+
+import argparse, os, re, multiprocessing
 
 def parse_args():
 	'''
@@ -171,7 +173,7 @@ def fasta_to_dict(fasta, ref_seq='n'):
 			if inl == '':
 				pass
 			elif inl[0] == '>': # start of a new sequence entry
-				print (f'{c % 1e3} k')
+				# print (f'{c % 1e3} k')
 				c += 1
 				
 				if ref_seq == 'n': # non-NCBI RefSeq genomes
@@ -241,13 +243,12 @@ def get_cds_align(pep_file, cds_out):
 	
 	with open(cds_out + '_cds_aligned.fasta', 'w') as oup:
 		flag = 0
+		
 		for pep in pep_dict.keys():
-			ref_seq = 'y'
-			
 			# determine which sequence belongs to which species
-			if 'TAIR10' in pep_dict[pep][0]:
-				cds_file = '/home/seguraab/ara-kinase-prediction/data/TAIR10/Athaliana_167_TAIR10.cds.fa'
-				ref_seq = 'n'
+			print(pep_dict[pep][0])
+			if 'Arabidopsis thaliana' in pep_dict[pep][0]:
+				cds_file = '/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000001735.4/cds_from_genomic.fna'
 			
 			if 'Theobroma cacao' in pep_dict[pep][0]:
 				cds_file = '/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000208745.1/cds_from_genomic.fna'
@@ -262,10 +263,11 @@ def get_cds_align(pep_file, cds_out):
 				cds_file = '/home/seguraab/ara-kinase-prediction/data/NCBI_genomes/GCF_000188115.5/cds_from_genomic.fna'
 			
 			# read species coding sequence fasta into a dict
-			cds_dict = fasta_to_dict(cds_file, ref_seq)
+			cds_dict = fasta_to_dict(cds_file, ref_seq='y') # fa# fasta file is in NCBI RefSeq formatsta file is in NCBI RefSeq format
 			
 			# back translate the peptide squences to nucleotide coding sequences
 			seq, flag = back_translate(pep_dict[pep][1], cds_dict[pep][1])
+			
 			if flag:
 				print('Error:', pep)
 			
@@ -279,7 +281,10 @@ if __name__ == '__main__':
 	args = parse_args() # Argument parsing
 
 	muscle_res = args.dir # MUSCLE results directory
-	pep_files = [file for file in os.listdir(muscle_res)] # protein sequence alignment files
+	
+	# protein sequence alignment files
+	pep_files = [file for file in os.listdir(muscle_res) if \
+			  (file != 'cds_alignments') and (file.endswith('_alignment.fasta'))]
 	
 	os.chdir(muscle_res) # Save CDS alignment files in the same directory
 	if not os.path.exists('cds_alignments'):
@@ -288,7 +293,6 @@ if __name__ == '__main__':
 	os.chdir('cds_alignments') # Change to the new directory
 
 	# Align peptide sequence alignment to nucleotide coding sequences
-	for file in pep_files:
-		if file != 'cds_alignments': # skip the directory name
-			cds_out = file.split('_alignment.fasta')[0]
-			get_cds_align('../' + file, cds_out)
+	pool = multiprocessing.Pool(multiprocessing.cpu_count())
+	pool.starmap(get_cds_align, [('../' + file, file.split('_alignment.fasta')[0]) for file in pep_files])
+	pool.close()
