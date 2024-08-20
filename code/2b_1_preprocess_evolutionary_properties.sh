@@ -11,13 +11,14 @@ First: Query Arabidopsis thaliana protein sequences with BLASTp against 4 specie
 Second: Generate protein sequence alignments with MUSCLE from BLASTp results
 
 Third: (Did not do this step)
-  - Back translate MUSCLE alignments to nucleotide coding sequence alignments
   - Build gene trees from the coding sequence alignments with RAxML
 
 Actual Third:
+  - Back translate MUSCLE alignments to nucleotide coding sequence alignments
   - Calculate the evolutionary rate (Ka/Ks) for each gene with PAML
   - Calculate the nucleotide and amino acid sequence similarity with EMBOSS Needle
 '
+
 # Author: Kenia Segura Abá
 
 ######################## First. Run the BLASTp searches ########################
@@ -70,6 +71,7 @@ run_blastp $Tc_p "protein.faa" "Tcacao_db" $out_path "TAIR10_Tcacao"
 run_blastp $Gm_p "protein.faa" "Gmax_db" $out_path "TAIR10_Gmax"
 run_blastp $Sl_p "protein.faa" "Slycopersicum_db" $out_path "TAIR10_Slycopersicum"
 run_blastp $Pt_p "protein.faa" "Ptrichocarpa_db" $out_path "TAIR10_Ptrichocarpa"
+
 
 ################ Second. Protein sequence Alignments with MUSCLE ###############
 convert_to_one_liner() {
@@ -174,20 +176,22 @@ align_seqs "${data_path}/0_blast_res/blastp_TAIR10_top_hits_all.txt" \
 
 
 ###################### Third. Ka, Ks estimation with PAML ######################
+# Back translate protein sequence alignments to coding sequence alignments
+conda activate py310
+muscle_res=/home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/1_muscle_res
+python /home/seguraab/ara-kinase-prediction/code/2b_3_back_translate_alignment.py -dir $muscle_res
+conda deactivate
+
+# Estimate Ka, Ks with PAML yn00 from coding sequence alignments
 conda activate py310
 python /home/seguraab/ara-kinase-prediction/code/2b_4_run_paml_yn00.py \
   -cds_dir /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/1_muscle_res/cds_alignments \
   -out_dir /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/3_paml_res/actual_out
 conda deactivate
 
+
 ###### CODE GRAVEYARD: Didn't use them, but want to keep. They work well. ######
 ######################## Third. Gene Trees with RAxML ##########################
-# Back translate protein sequence alignments to nucleotide sequence Alignments
-conda activate py310
-muscle_res=/home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/1_muscle_res
-python /home/seguraab/ara-kinase-prediction/code/2b_3_back_translate_alignment.py -dir $muscle_res
-conda deactivate
-
 # Build gene trees with RAxML
 mkdir /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/2_raxml_res
 cd /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/2_raxml_res
