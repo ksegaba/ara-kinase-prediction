@@ -10,11 +10,11 @@ First: Query Arabidopsis thaliana protein sequences with BLASTp against 4 specie
 
 Second: Generate protein sequence alignments with MUSCLE from BLASTp results
 
-Third:
+Third: (Did not do this step)
   - Back translate MUSCLE alignments to nucleotide coding sequence alignments
   - Build gene trees from the coding sequence alignments with RAxML
 
-Fourth:
+Actual Third:
   - Calculate the evolutionary rate (Ka/Ks) for each gene with PAML
   - Calculate the nucleotide and amino acid sequence similarity with EMBOSS Needle
 '
@@ -130,7 +130,7 @@ align_seqs() {
     fi
   
     ## Align the protein sequences
-    muscle -align ${save_prefix}_${at_gene}'_gene_protein.fasta' \
+    muscle -align ${save_prefix}_${at_gene}_gene_protein.fasta \
       -output ${save_prefix}_${at_gene}_alignment.fasta
     
     # rm ${save_prefix}_${at_gene}_gene_protein.fasta # delete the gene pair FASTA file
@@ -159,7 +159,7 @@ convert_to_one_liner $Pt_p
 
 # Combine the top gene hits from all species into one file
 conda activate py310
-python /home/seguraab/ara-kinase-prediction/code/2b_1_combine_blastp_res.py
+python /home/seguraab/ara-kinase-prediction/code/2b_2_combine_blastp_res.py
 conda deactivate
 
 # Run the alignment for each Arabidopsis gene with its top hits in all the other species
@@ -172,35 +172,62 @@ align_seqs "${data_path}/0_blast_res/blastp_TAIR10_top_hits_all.txt" \
   $Sl_p"_one_liner.fa" \
   "${data_path}/1_muscle_res/blastp_TAIR10_top_hits_all"
 
-################## Third. Gene Trees with RAxML #####################
+
+###################### Third. Ka, Ks estimation with PAML ######################
+conda activate py310
+python /home/seguraab/ara-kinase-prediction/code/2b_4_run_paml_yn00.py \
+  -cds_dir /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/1_muscle_res/cds_alignments \
+  -out_dir /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/3_paml_res/actual_out
+conda deactivate
+
+###### CODE GRAVEYARD: Didn't use them, but want to keep. They work well. ######
+######################## Third. Gene Trees with RAxML ##########################
 # Back translate protein sequence alignments to nucleotide sequence Alignments
 conda activate py310
-
 muscle_res=/home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/1_muscle_res
-python /home/seguraab/ara-kinase-prediction/code/2b_1_back_translate_alignment.py -dir $muscle_res
-
+python /home/seguraab/ara-kinase-prediction/code/2b_3_back_translate_alignment.py -dir $muscle_res
 conda deactivate
 
 # Build gene trees with RAxML
 mkdir /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/2_raxml_res
 cd /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/2_raxml_res
 
-# Progress bar
-total=$(cat $gene_file | wc -l)
-progress=0
+export muscle_res=/home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/1_muscle_res
 
-seed=1
-for file in $muscle_res/cds_alignments/*
-do
+build_tree() {
+  # Argument
+  file=$1  # Coding sequence alignment file
+  
   # Output file name
-  save=$(sed 's/_cds_aligned.fasta/_gene_tree/g' <<< $file)
+  save=$(sed 's/_cds_aligned.fasta//g' <<< $file)
   save=$(basename $save)
 
   # Build the gene tree
-  raxmlHPC-PTHREADS -s $file -n $save -f a -x $seed -p $seed -N 1000 -m PROTGAMMAAUTO -T 4
-  seed=$((seed + 1))
+  raxmlHPC-PTHREADS -s $file -n $save -f a -x 12345 -p 12345 -N 1000 -m PROTGAMMAAUTO -T 2
+}
 
-  # Update progress bar
-  progress=$((progress + 1))
-  echo -ne "Progress: $progress/$total\r"
-done
+export -f build_tree
+ls $muscle_res/cds_alignments/* | xargs -n 1 -P 16 -I {} bash -c 'build_tree "$@"' _ {}
+
+#################### Third. Ka, Ks estimation with PAML #######################
+# Convert coding sequence alignment files to phylip format
+fasta2phylip() {
+  :'Convert a MUSCLE alignment FASTA file to sequential PHYLIP format with ALTER
+  to use as input for PAML yn00 method.'
+
+  local file=$1 # input FASTA file
+  
+  save=$(sed 's/fasta/phy/g' <<< $file) # Output file name
+  
+  java -jar ~/external_software/ALTER/alter-lib/target/ALTER-1.3.4-jar-with-dependencies.jar \
+    -i $file -if FASTA -ip MUSCLE -io Linux \
+    -o $save -of PHYLIP -op PAML -os -oo Linux
+}
+cd /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/1_muscle_res/cds_alignments
+fasta2phylip "blastp_TAIR10_top_hits_all_NP_851211.1_cds_aligned.fasta"
+
+# Estimate Ka, Ks with PAML yn00 from protein sequence alignments
+cd ../../3_paml_res
+ctl_file=/home/seguraab/ara-kinase-prediction/code/2b_4_paml_yn00.ctl
+software=/home/seguraab/external_software/paml-master/bin
+${software}/yn00 /home/seguraab/ara-kinase-prediction/code/2b_4_paml_yn00.ctl
