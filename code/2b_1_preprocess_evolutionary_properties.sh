@@ -71,7 +71,7 @@ run_blastp $Tc_p "protein.faa" "Tcacao_db" $out_path "TAIR10_Tcacao"
 run_blastp $Gm_p "protein.faa" "Gmax_db" $out_path "TAIR10_Gmax"
 run_blastp $Sl_p "protein.faa" "Slycopersicum_db" $out_path "TAIR10_Slycopersicum"
 run_blastp $Pt_p "protein.faa" "Ptrichocarpa_db" $out_path "TAIR10_Ptrichocarpa"
-
+run_blastp $At_p "protein.faa" "Athaliana_db" $out_path "TAIR10_self" # set --max-target-seqs 2
 
 ################ Second. Protein sequence Alignments with MUSCLE ###############
 convert_to_one_liner() {
