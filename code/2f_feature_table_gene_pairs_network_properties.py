@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+'''Create the network properties feature table for gene pairs as instances.'''
 # %%
 import json
 import pandas as pd
