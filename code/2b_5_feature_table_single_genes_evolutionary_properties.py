@@ -187,6 +187,7 @@ def apply_transformations(values, method):
 def calc_feature_values(json, calc_type, col_name):
 	if calc_type == 'Binary':
 		values = pd.DataFrame.from_dict(json, orient='index')
+		values.columns = [col_name]
 		return values
 	
 	if calc_type == 'Continuous':
@@ -224,9 +225,9 @@ if __name__ == '__main__':
 		'data/2021_cusack_data/21_arabidopsis_redundancy/02_evolutionary_properties/retention_rate/Retention_rate_dictionary.json'))
 	
 	make_blast_adj() # Create the adjacency matrix of consistent BLAST hits
-	blast_hits = dt.fread(
-		'data/evolutionary_properties_data/0_blast_res/TAIR10_self_best_matches_adj_mat.csv').\
-		to_pandas() # Load the adjacency matrix
+	# blast_hits = dt.fread(
+	# 	'data/Features/evolutionary_properties_single_genes_reciprocal_best_match_adjacency_matrix.csv.gz').\
+	# 	to_pandas() # Load the adjacency matrix
 	
 	make_paml_df() # Get feature values from paml
 	paml_df = dt.fread(
@@ -295,7 +296,6 @@ if __name__ == '__main__':
 	bet_wgd_df = pd.DataFrame.from_dict(beta_wgd, orient='index') # 27440 rows, all unique genes
 
 	bet_wgd_df.apply(lambda x: x.name in gen_wgd_df.index, axis=1).sum() # returns 27440
-
 # %%
 	############################################################################
 	# Check which genes have lethality scores
@@ -307,26 +307,4 @@ if __name__ == '__main__':
 	# for key, valu in pheno.items():
 	# 	lengths.append(len(set(valu)))
 	# set(lengths) # returns 2, so there are only 2 unique values for each key
-
-	# Check how many of our kinase gene pair instances have single gene lethality data
-	'''I need to move this code to the gene pair file, but I am curious now.'''
-	pairs = pd.read_csv('data/instances_dataset_1.txt', sep='\t')
-	uniq_genes = set(pairs.gene1.unique().tolist() + pairs.gene2.unique().tolist())
-
-	num_with_data = []
-	for gene in uniq_genes:
-		if gene in pheno.keys():
-			num_with_data.append(gene)
-
-	len(num_with_data)
-
-	# Check how many of our kinase gene pairs have gene interaction info on Biogrid
-	gi = pd.read_csv('data/BIOGRID_data/arabidopsis_gi_biogrid.txt', sep='\t', header=None)
-	pair_sets = {tuple(sorted([gene1, gene2])) for gene1, gene2 in zip(pairs.gene1, pairs.gene2)}
-	gi_sets = {tuple(sorted([gene1, gene2])) for gene1, gene2 in zip(gi[5], gi[6])}
-	len(gi_sets) # 294 unique gene pairs from BIOGRID
-	gi_sets_with_dups = [tuple(sorted([gene1, gene2])) for gene1, gene2 in zip(gi[5], gi[6])]
-	from collections import Counter
-	dict_val_counts(Counter(gi_sets_with_dups))
-	pair_sets.intersection(gi_sets) # only 7 gene pairs
 	############################################################################
