@@ -3,7 +3,9 @@ data/
 code/.ipynb_checkpoints/
 code/utils_py2/
 external_software/
+output/
 
 # Files to ignore
 code/utils_py2/get-pip.py
 code/utils_py2/Python-2.7.18.tgz
+
