@@ -7,6 +7,9 @@ import os
 import datatable as dt
 import pandas as pd
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 ################## INTEGRATE FEATURE TABLES BEFORE IMPUTATION ##################
 os.chdir('/home/seguraab/ara-kinase-prediction/data/Features')
@@ -121,10 +124,6 @@ color_dict = dict(zip(X_corr.Test_file, X_corr.Test_file_color))
 
 # Create a clustermap of X_corr and add the test file names as a colored 
 # rectangles on the rows and columns of the clustermap
-import seaborn as sns
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-
 fig, ax = plt.subplots(1, 1, figsize=(10, 10))
 g = sns.clustermap(X_corr.drop(columns=['Test_file', 'Test_file_color']),
                    cmap='RdBu_r', center=0, method='average',
@@ -191,6 +190,33 @@ for i in range(10):
         pd.concat(df_test, axis=1, ignore_index=False)], axis=0)
     combined.insert(0, 'Y', instances.loc[combined.index,:].values)
     
-    combined.to_csv(
-        'Table_features_imputed_kinase_prediction_train_test_ara_m_fold_' + str(i) + '.csv')
-    del combined, train_files, test_files, df_train, df_test
+    # combined.to_csv(
+    #     'Table_features_imputed_kinase_prediction_train_test_ara_m_fold_' + str(i) + '.csv')
+    
+    # Correlation between features
+    combined_corr = combined.drop(columns='Y').T.corr(method='pearson')
+    
+    # assign the X_corr index values to the corresponding test file. The test files contain subsets of the X_corr index values.
+    combined_corr['Test_file'] = ''
+    test = pd.read_csv(f'../../test_ara_m_fold_{i}.txt', header=None)
+    combined_corr.loc[test[0], 'Test_file'] = f'test_ara_m_fold_{i}.txt'
+    
+    # map the test file names to RGB colors
+    combined_corr['Test_file_color'] = combined_corr.Test_file.apply(lambda x: 'purple' if x != '' else 'white')
+    color_dict = dict(zip(combined_corr.Test_file, combined_corr.Test_file_color))
+    
+    # generate clustermap
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    g = sns.clustermap(combined_corr.drop(columns=['Test_file', 'Test_file_color']),
+        cmap='RdBu_r', center=0, method='average', xticklabels=False,
+        yticklabels=False, row_colors=combined_corr.Test_file_color,
+        col_colors=combined_corr.Test_file_color)
+    
+    # add a legend with the test file colors
+    legend_patches = [mpatches.Patch(color=color, label=label) for label, color in color_dict.items()]
+    g.fig.legend(handles=legend_patches, loc='lower left', bbox_to_anchor=(0, 0),
+           fontsize='small', title='Test file')
+    plt.savefig('Table_features_imputed_kinase_prediction_train_test_ara_m_fold_' + str(i) + '_clustermap.pdf')
+    plt.close()
+    
+    del combined, combined_corr, train_files, test_files, df_train, df_test
