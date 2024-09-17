@@ -1,31 +1,37 @@
 #!/usr/bin/env python3
 """
-XGBoost Binary Classification with Leave-One-Out Cross-Validation
+Binary Classification with XGBoost or AutoGluon
 
 Required Inputs
 	-X      Path to feature matrix file
 	-y_name Column name of label in X matrix
 	-test   File containing list of test instances
-	-save   Path to save output files
+	-save   Path to save output files to
 	-prefix Prefix of output file names
+	-alg    Algorithm to use (xgboost or autogluon)
 	
-	# Optional
+	# Optional data processing arguments
 	-Y      Path to label matrix file, if label not in X matrix
-	-tag    Feature types/identifier for output file naming
-	-fold   k folds for Cross-Validation (default is 5)
-	-n      Number of CV repetitions (default is 10)
 	-feat   File containing features (from X) to include in model
+	-feat_list Comma-separated list of features (from X) to include in model
+	-fs     Whether to perform feature selection or not (y/n, default is n)
+	-balance Balance the training set (y/n, default is n)
+	-n_bal  Number of balanced datasets to create (default is 15)
+	
+	# Optional arguments for XGBoost
+	-ht     Hyperparameter tuning method (kfold/loo, default is kfold)
+	-fold   k folds for Cross-Validation (default is 5)
+	-n      Number of training repetitions (default is 10)
+	-tag    Feature types/identifier for distinguising runs in results file
 	-plot   Plot feature importances and predictions (default is t)
 
-Outputs for each training repetition (prefixed with <prefix>_)
-	_lm_test_rep_*.pdf        Regression plot of predicted and actual test labels
+XGBoost outputs for each training repetition (prefixed with <prefix>_)
 	_model_rep_*.save         XGBoost model
 	_top20_rep_*.pdf          Plot of top 20 features' importance scores
 
-Summary outputs (prefixed with <prefix>_)
+XGboost summary outputs (prefixed with <prefix>_)
 	_imp.csv                  Feature importance scores
-	_cv_results.csv           Cross-validation results (various metrics)
-	_test_results.csv         Evaluation results (various metrics)
+	_preds.csv                Predicted labels
 	RESULTS_xgboost.txt       Aggregated results (various metrics)
  
 About Hyperparameter Tuning
@@ -53,11 +59,42 @@ import seaborn as sns
 from datetime import datetime
 from hyperopt import hp, fmin, tpe, Trials, STATUS_OK
 from hyperopt.pyll.base import scope
+from sklearn.utils import resample
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import make_scorer
 from sklearn.metrics import roc_auc_score, precision_score, recall_score
 from sklearn.metrics import f1_score, matthews_corrcoef, accuracy_score
 from sklearn.model_selection import cross_val_predict, cross_validate
 from sklearn.model_selection import LeaveOneOut, StratifiedKFold
+from autogluon.tabular import TabularPredictor
+
+
+def create_balanced(X, n):
+	'''Create balanced training datasets by downsampling the majority class.'''
+	
+	# Split the data into positive and negative classes
+	pos_class = X[X['Y'] == 1]
+	neg_class = X[X['Y'] == 0]
+	
+	num_datasets = n
+	balanced_datasets = []
+	for b in range(num_datasets):
+		# Downsample the negative class to match the number of positives
+		neg_downsampled = resample(neg_class,
+								   replace=False,  # No replacement
+								   n_samples=len(pos_class),  # Match positive class size
+								   random_state=b)  # Set random state for reproducibility
+		
+		# Combine the positive and downsampled negative class to create a balanced dataset
+		balanced_data = pd.concat([pos_class, neg_downsampled])
+		
+		# Shuffle the dataset to mix positive and negative samples
+		balanced_data = balanced_data.sample(frac=1, random_state=i)
+		
+		# Append this balanced dataset to the list
+		balanced_datasets.append(balanced_data)
+	
+	return balanced_datasets
 
 
 def f1_score_safe(y_true, y_pred):
@@ -68,6 +105,7 @@ def f1_score_safe(y_true, y_pred):
 	behavior.'''
 	return f1_score(y_true, y_pred, zero_division=1)
 
+
 def precision_score_safe(y_true, y_pred):
 	'''Calculate the precision score with zero division handling
 	It resolves the following error:
@@ -75,6 +113,7 @@ def precision_score_safe(y_true, y_pred):
 	no predicted samples. Use `zero_division` parameter to control this
 	behavior.'''
 	return precision_score(y_true, y_pred, zero_division=1)
+
 
 def recall_score_safe(y_true, y_pred):
 	'''Calculate the recall score with zero division handling
@@ -105,13 +144,16 @@ def hyperopt_objective_loo(params):
 		random_state=42
 	)
 	
+	# Normalize the data
+	X_train_norm = MinMaxScaler().fit_transform(X_train)
+	
 	# Leave-One-Out Cross-Validation
 	loo = LeaveOneOut()
 	loo_preds = []
 	loo_actual = []
 	
-	for loo_train_idx, loo_val_idx in loo.split(X_train):
-		X_train_loo, X_val_loo = X_train.iloc[loo_train_idx], X_train.iloc[loo_val_idx]
+	for loo_train_idx, loo_val_idx in loo.split(X_train_norm):
+		X_train_loo, X_val_loo = X_train_norm.iloc[loo_train_idx], X_train_norm.iloc[loo_val_idx]
 		y_train_loo, y_val_loo = y_train.iloc[loo_train_idx], y_train.iloc[loo_val_idx]
 		
 		mod.fit(X_train_loo, y_train_loo) # Train on LOO data
@@ -148,10 +190,13 @@ def hyperopt_objective_kfold(params):
 		random_state=42
 	)
 	
+	# Normalize the data
+	X_train_norm = MinMaxScaler().fit_transform(X_train)
+	
 	cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 	f1_scorer = make_scorer(f1_score_safe)
 	validation_loss = cross_validate(
-		mod, X_train, y_train,
+		mod, X_train_norm, y_train,
 		scoring="accuracy",
 		cv=cv,
 		n_jobs=-1,
@@ -168,7 +213,7 @@ def param_hyperopt(param_grid, max_evals=100, objective_type="loo"):
 	Written by Thejesh Mallidi
 	"""
 	trials = Trials()
-
+	
 	if objective_type == "loo":
 		params_best = fmin(
 			fn=hyperopt_objective_loo,
@@ -254,19 +299,21 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 		# print("Train MCC: %f" % (mcc_train))
 		# print("Train Accuracy: %f" % (acc_train))
 		####################################################
-
+		
+		X_train_norm = MinMaxScaler().fit_transform(X_train) # Normalize
+		
 		k_fold = StratifiedKFold(n_splits=fold, shuffle=True, random_state=j)
 		cv_pred = cross_val_predict(
-			best_model, X_train, y_train, cv=k_fold, n_jobs=-1)
+			best_model, X_train_norm, y_train, cv=k_fold, n_jobs=-1)
 		
 		# Thejesh recommended I look at the individual validation performances #
 		# if j==0:
-		# 	for train_idx, val_idx in k_fold.split(X_train, y_train):
+		# 	for train_idx, val_idx in k_fold.split(X_train_norm, y_train):
 		# 		print('y_train', y_train.iloc[train_idx].value_counts())
-		# 		print('X_train', y_train.iloc[val_idx].value_counts())
+		# 		print('X_train_norm', y_train.iloc[val_idx].value_counts())
 				
-		# 		best_model.fit(X_train.iloc[train_idx], y_train.iloc[train_idx])
-		# 		best_model.predict(X_train.iloc[val_idx])
+		# 		best_model.fit(X_train_norm.iloc[train_idx], y_train.iloc[train_idx])
+		# 		best_model.predict(X_train_norm.iloc[val_idx])
 		########################################################################
 
 		# Performance statistics on validation set
@@ -286,8 +333,9 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 		results_cv.append(result_val)
 		
 		# Evaluate the model on the test set
-		best_model.fit(X_train, y_train)
-		y_pred = best_model.predict(X_test)
+		X_test_norm = MinMaxScaler().fit_transform(X_test) # Normalize
+		best_model.fit(X_train_norm, y_train)
+		y_pred = best_model.predict(X_test_norm)
 		
 		# Performance on the test set
 		roc_auc_test = roc_auc_score(y_test, y_pred)
@@ -334,6 +382,7 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	# Write predictions across reps to file
 	pd.DataFrame.from_dict(preds).to_csv(f"{args.save}/{prefix}_preds.csv")
 
+	# Performance on the training set
 	tmp = pd.DataFrame.from_dict(preds)
 	preds_train = tmp.loc[X_train.index,:]
 	f1_train = preds_train.apply(lambda x: f1_score_safe(y_train, x), axis=1)
@@ -351,6 +400,78 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	
 	return (results_cv, results_test)
 
+def save_xgb_results(results_cv, results_test, args, tag):
+	'''Write training and evaluation performance results to a file.'''
+	
+	results_cv = pd.DataFrame(
+		results_cv, 
+		columns=["ROC-AUC_val", "Precision_val", "Recall_val", "F1_val",
+		"MCC_val", "Accuracy_val"])
+	results_test = pd.DataFrame(
+		results_test, 
+		columns=["ROC-AUC_test", "Precision_test", "Recall_test", "F1_test",
+		"MCC_test", "Accuracy_test"])
+	
+	# Aggregate results and save to file
+	if not os.path.isfile(f"{args.save}/RESULTS_xgboost.txt"):
+		out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
+		out.write("Date\tRunTime\tTag\tY\tNumInstances\tNumFeatures")
+		out.write("\tCV_fold\tCV_rep\tROC-AUC_val\tROC-AUC_val_sd\tPrecision_val")
+		out.write("\tPrecision_val_sd\tRecall_val\tRecall_val_sd")
+		out.write("\tF1_val\tF1_val_sd\tMCC_val\tMCC_val_sd")
+		out.write("\tAccuracy_val\tAccuracy_val_sd\tROC-AUC_test\tROC-AUC_test_sd")
+		out.write("\tPrecision_test\tPrecision_test_sd\tRecall_test")
+		out.write("\tRecall_test_sd\tF1_test\tF1_test_sd\tMCC_test")
+		out.write("\tMCC_test_sd\tAccuracy_test\tAccuracy_test_sd")
+		out.close()
+	
+	out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
+	out.write(f'\n{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t')
+	out.write(f'{run_time}\t{tag}\t{args.y_name}\t{X_train.shape[0]}\t')
+	out.write(f'{X.shape[1]}\t{int(args.fold)}\t{int(args.n)}\t')
+	out.write(f'{np.mean(results_cv["ROC-AUC_val"])}\t{np.std(results_cv["ROC-AUC_val"])}\t')
+	out.write(f'{np.mean(results_cv["Precision_val"])}\t{np.std(results_cv["Precision_val"])}\t')
+	out.write(f'{np.mean(results_cv["Recall_val"])}\t{np.std(results_cv["Recall_val"])}\t')
+	out.write(f'{np.mean(results_cv["F1_val"])}\t{np.std(results_cv["F1_val"])}\t')
+	out.write(f'{np.mean(results_cv["MCC_val"])}\t{np.std(results_cv["MCC_val"])}\t')
+	out.write(f'{np.mean(results_cv["Accuracy_val"])}\t{np.std(results_cv["Accuracy_val"])}\t')
+	out.write(f'{np.mean(results_test["ROC-AUC_test"])}\t{np.std(results_test["ROC-AUC_test"])}\t')
+	out.write(f'{np.mean(results_test["Precision_test"])}\t{np.std(results_test["Precision_test"])}\t')
+	out.write(f'{np.mean(results_test["Recall_test"])}\t{np.std(results_test["Recall_test"])}\t')
+	out.write(f'{np.mean(results_test["F1_test"])}\t{np.std(results_test["F1_test"])}\t')
+	out.write(f'{np.mean(results_test["MCC_test"])}\t{np.std(results_test["MCC_test"])}\t')
+	out.write(f'{np.mean(results_test["Accuracy_test"])}\t{np.std(results_test["Accuracy_test"])}')
+	out.close()
+
+
+def run_autogluon(X_train, X_test, y_train, y_test, label, path, prefix):
+	'''Run AutoGluon for binary classification.'''
+	
+	# Directory to save models and other output to
+	if not os.path.exists(f'{path}/{prefix}'):
+		os.makedirs(f'{path}/{prefix}')
+	
+	os.chdir(f'{path}/{prefix}')
+	
+	# Normalize X and y datasets
+	X_train_norm = MinMaxScaler().fit_transform(X_train)
+	X_test_norm = MinMaxScaler().fit_transform(X_test)
+	
+	# Combine X and y datasets
+	X_train_norm[label] = y_train.loc[X_train_norm.index,:]
+	X_test_norm[label] = y_test.loc[X_test_norm.index,:]
+	
+	# Model training
+	predictor = TabularPredictor(
+		label=label, eval_metric='f1', path=f'{path}/{prefix}').fit(X_train_norm)
+	importance = predictor.feature_importance(X_test_norm) # permutation importance
+	importance.to_csv(f'{prefix}_IMPORTANCE.csv')
+	
+	# Evaluation
+	y_pred = predictor.predict(X_test_norm.drop(columns=[label]))
+	predictor.evaluate(X_test_norm, silent=True)
+	predictor.leaderboard(X_test_norm).to_csv(f'{prefix}_RESULTS.csv')
+
 
 if __name__ == "__main__":
 	# Argument parser
@@ -366,53 +487,70 @@ if __name__ == "__main__":
 	req_group.add_argument(
 		"-test", help="path to file of test set instances", required=True)
 	req_group.add_argument(
-		"-save", help="path to save output files", required=True)
+		"-save", help="path to save output files to", required=True)
 	req_group.add_argument(
 		"-prefix", help="prefix of output file names", required=True)
-	
+	req_group.add_argument(
+		"-alg", help="algorithm to use (xgboost or autogluon)", required=True)
+
 	# Optional input
 	req_group.add_argument(
 		"-Y", help="path to label table file", default="")
 	req_group.add_argument(
-		"-tag", help="description about run to add to results file", default="")
+		"-tag",
+		help="Feature type/description for distinguising runs in results file",
+		default="")
 	req_group.add_argument(
-		"-ht", help="define the hyperparameter tuning cross-validation method (Stratified K-Fold (kfold) or Leave-One-Out(loo))",
+		"-ht",
+		help="define the hyperparameter tuning cross-validation method (Stratified K-Fold (kfold) or Leave-One-Out(loo))",
 		default="kfold")
 	req_group.add_argument(
 		"-fold",
 		help="k number of cross-validation folds for training the best model. This parameter does not change the hyperopt object function fold number.",
 		default=5)
 	req_group.add_argument(
-		"-n", help="number of cross-validation repetitions", default=10)
+		"-n", help="number of training repetitions", default=10)
 	req_group.add_argument(
-		"-feat", help="file containing features (from X) to include in model", default="all")
+		"-feat", help="file containing features (from X) to include in model",
+		default="all")
 	req_group.add_argument(
-		"-feat_list", help="comma-separated list of features (from X) to include in model", 
-		nargs="+", type=lambda s: [col.strip() for col in s.split(",")], default=[])
+		"-feat_list",
+		help="comma-separated list of features (from X) to include in model",
+		nargs="+", type=lambda s: [col.strip() for col in s.split(",")],
+		default=[])
 	req_group.add_argument(
-		"-plot", help="plot feature importances and predictions (t/f)", default="t")
+		"-fs", help="whether to perform feature selection or not (y/n)",
+		default="n")
+	req_group.add_argument(
+		"-bal", help="whether to balance the training set or not (y/n)",
+		default="n")
+	req_group.add_argument(
+		"-n_bal", help="number of balanced datasets to create", default=15)
+	req_group.add_argument(
+		"-plot", help="plot feature importances and predictions (t/f)",
+		default="t")
 	
 	# Help
 	if len(sys.argv) == 1:
 		parser.print_help()
 		sys.exit()
 	args = parser.parse_args() # Read arguments
-
+	
 	# Read in data
 	X = dt.fread(args.X).to_pandas() # feature table
 	X.set_index(X.columns[0], inplace=True)
-
+	
 	if args.Y == "": # get the label from X or Y files
 		y = X.loc[:, args.y_name]
 		X.drop(columns=args.y_name, inplace=True)
 	else:
 		Y = args.Y
 		y = Y.loc[:, args.y_name]
-  
+	
 	y = y.astype(int) # convert binary bool values to integer
 	
 	test = pd.read_csv(args.test, header=None) # test instances
-
+	
 	# Filter out features not in the given feat file - default: keep all
 	if args.feat != "all":
 		print("Using subset of features from: %s" % args.feat)
@@ -425,63 +563,55 @@ if __name__ == "__main__":
 		print("Using subset of features from list", args.feat_list[0])
 		X = X.loc[:,args.feat_list[0]]
 		print(f"New dimensions: {X.shape}")
-
+	
 	# Train-test split
 	X_train = X.loc[~X.index.isin(test[0])]
 	X_test = X.loc[test[0]]
 	y_train = y.loc[~y.index.isin(test[0])]
 	y_test = y.loc[test[0]]
-
+	
 	# Ensure rows are in the same order
 	X_train = X_train.loc[y_train.index,:]
 	X_test = X_test.loc[y_test.index,:]
-
+	
 	print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 	print(y_train.value_counts(), y_test.value_counts())
 	
-	# Train the model with Leave-One-Out Testing
-	start = time.time()
-	results_cv, results_test = run_xgb(X_train, y_train, X_test, y_test,
-		args.y_name, int(args.fold), int(args.n), args.prefix, args.ht, args.plot)
-	run_time = time.time() - start
-	print("Training Run Time: %f" % (run_time))
-
-	# Save results to file
-	results_cv = pd.DataFrame(
-		results_cv, 
-		columns=["ROC-AUC_val", "Precision_val", "Recall_val", "F1_val",
-		"MCC_val", "Accuracy_val"])
-	results_test = pd.DataFrame(
-		results_test, 
-		columns=["ROC-AUC_test", "Precision_test", "Recall_test", "F1_test",
-		"MCC_test", "Accuracy_test"])
-
-	# Aggregate results and save to file
-	if not os.path.isfile(f"{args.save}/RESULTS_xgboost.txt"):
-		out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
-		out.write("Date\tRunTime\tTag\tY\tNumInstances\tNumFeatures")
-		out.write("\tCV_fold\tCV_rep\tROC-AUC_val\tROC-AUC_val_sd\tPrecision_val")
-		out.write("\tPrecision_val_sd\tRecall_val\tRecall_val_sd")
-		out.write("\tF1_val\tF1_val_sd\tMCC_val\tMCC_val_sd")
-		out.write("\tAccuracy_val\tAccuracy_val_sd\tROC-AUC_test\tROC-AUC_test_sd")
-		out.write("\tPrecision_test\tPrecision_test_sd\tRecall_test")
-		out.write("\tRecall_test_sd\tF1_test\tF1_test_sd\tMCC_test")
-		out.write("\tMCC_test_sd\tAccuracy_test\tAccuracy_test_sd")
-		out.close()
-
-	out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
-	out.write(f'\n{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t')
-	out.write(f'{run_time}\t{args.tag}\t{args.y_name}\t{X_train.shape[0]}\t')
-	out.write(f'{X.shape[1]}\t{int(args.fold)}\t{int(args.n)}\t')
-	out.write(f'{np.mean(results_cv["ROC-AUC_val"])}\t{np.std(results_cv["ROC-AUC_val"])}\t')
-	out.write(f'{np.mean(results_cv["Precision_val"])}\t{np.std(results_cv["Precision_val"])}\t')
-	out.write(f'{np.mean(results_cv["Recall_val"])}\t{np.std(results_cv["Recall_val"])}\t')
-	out.write(f'{np.mean(results_cv["F1_val"])}\t{np.std(results_cv["F1_val"])}\t')
-	out.write(f'{np.mean(results_cv["MCC_val"])}\t{np.std(results_cv["MCC_val"])}\t')
-	out.write(f'{np.mean(results_cv["Accuracy_val"])}\t{np.std(results_cv["Accuracy_val"])}\t')
-	out.write(f'{np.mean(results_test["ROC-AUC_test"])}\t{np.std(results_test["ROC-AUC_test"])}\t')
-	out.write(f'{np.mean(results_test["Precision_test"])}\t{np.std(results_test["Precision_test"])}\t')
-	out.write(f'{np.mean(results_test["Recall_test"])}\t{np.std(results_test["Recall_test"])}\t')
-	out.write(f'{np.mean(results_test["F1_test"])}\t{np.std(results_test["F1_test"])}\t')
-	out.write(f'{np.mean(results_test["MCC_test"])}\t{np.std(results_test["MCC_test"])}\t')
-	out.write(f'{np.mean(results_test["Accuracy_test"])}\t{np.std(results_test["Accuracy_test"])}')
+	if args.balance == 'n':
+		# Train the model with an imbalanced dataset
+		if args.alg == 'xgboost':
+			start = time.time()
+			results_cv, results_test = run_xgb(X_train, y_train, X_test, y_test,
+				args.y_name, int(args.fold), int(args.n), args.prefix, args.ht,
+				args.plot)
+			run_time = time.time() - start
+			print("Training Run Time: %f" % (run_time))
+		
+			# Write results to file
+			save_xgb_results(results_cv, results_test, args, args.tag)
+		
+		if args.alg == 'autogluon':
+			run_autogluon(X_train, X_test, y_train, y_test, args.y_name, args.save, args.prefix)
+	
+	if args.balance == 'y':
+		# Train the model with balanced datasets
+		balanced_datasets = create_balanced(X_train, int(args.n_bal))
+		
+		for b in range(args.n_bal):
+			X_train_bal = balanced_datasets[b].drop(columns=args.y_name)
+			y_train_bal = y_train.loc[X_train_bal.index,:]
+			
+			if args.alg == 'xgboost':
+				start = time.time()
+				results_cv, results_test = run_xgb(X_train_bal, y_train_bal,
+					X_test, y_test, args.y_name, int(args.fold), int(args.n),
+					f'{args.prefix}_balanced_{b}', args.ht, args.plot)
+				run_time = time.time() - start
+				print("Training Run Time: %f" % (run_time))
+		
+				# Write results to file
+				save_xgb_results(results_cv, results_test, args, f'{args.tag}_balanced_{b}')
+			
+			if args.alg == 'autogluon':
+				run_autogluon(X_train_bal, X_test, y_train_bal, y_test,
+					args.y_name, args.save, f'{args.prefix}_balanced_{b}')
