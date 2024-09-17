@@ -6,7 +6,7 @@ Required Inputs
 	-X      Path to feature matrix file
 	-y_name Column name of label in X matrix
 	-test   File containing list of test instances
-	-save   Path to save output files to
+	-save   FULL path to save output files to
 	-prefix Prefix of output file names
 	-alg    Algorithm to use (xgboost or autogluon)
 	
@@ -15,12 +15,12 @@ Required Inputs
 	-feat   File containing features (from X) to include in model
 	-feat_list Comma-separated list of features (from X) to include in model
 	-fs     Whether to perform feature selection or not (y/n, default is n)
-	-balance Balance the training set (y/n, default is n)
+	-bal    Balance the training set (y/n, default is n)
 	-n_bal  Number of balanced datasets to create (default is 15)
 	
 	# Optional arguments for XGBoost
 	-ht     Hyperparameter tuning method (kfold/loo, default is kfold)
-	-fold   k folds for Cross-Validation (default is 5)
+	-fold   k folds for Cross-Validation during training (default is 5)
 	-n      Number of training repetitions (default is 10)
 	-tag    Feature types/identifier for distinguising runs in results file
 	-plot   Plot feature importances and predictions (default is t)
@@ -69,6 +69,74 @@ from sklearn.model_selection import LeaveOneOut, StratifiedKFold
 from autogluon.tabular import TabularPredictor
 
 
+def parse_args():
+    # Argument parser
+	parser = argparse.ArgumentParser(
+		description="XGBoost Regression on SNP and ORF data")
+	
+	# Required input
+	req_group = parser.add_argument_group(title="Required Input")
+	req_group.add_argument(
+		"-X", help="path to feature table file", required=True)
+	req_group.add_argument(
+		"-y_name", help="name of label in X file", required=True)
+	req_group.add_argument(
+		"-test", help="path to file of test set instances", required=True)
+	req_group.add_argument(
+		"-save", help="path to save output files to", required=True)
+	req_group.add_argument(
+		"-prefix", help="prefix of output file names", required=True)
+	req_group.add_argument(
+		"-alg", help="algorithm to use (xgboost or autogluon)", required=True)
+
+	# Optional data processing arguments
+	req_group.add_argument(
+		"-Y", help="path to label table file", default="")
+	req_group.add_argument(
+		"-feat", help="file containing features (from X) to include in model",
+		default="all")
+	req_group.add_argument(
+		"-feat_list",
+		help="comma-separated list of features (from X) to include in model",
+		nargs="+", type=lambda s: [col.strip() for col in s.split(",")],
+		default=[])
+	req_group.add_argument(
+		"-fs", help="whether to perform feature selection or not (y/n)",
+		default="n")
+	req_group.add_argument(
+		"-bal", help="whether to balance the training set or not (y/n)",
+		default="n")
+	req_group.add_argument(
+		"-n_bal", help="number of balanced datasets to create", default=15)
+	
+	# Optional arguments for XGBoost
+	req_group.add_argument(
+		"-ht",
+		help="define the hyperparameter tuning cross-validation method (Stratified K-Fold (kfold) or Leave-One-Out(loo))",
+		default="kfold")
+	req_group.add_argument(
+		"-fold",
+		help="k number of cross-validation folds for training the best model. This parameter does not change the hyperopt object function fold number.",
+		default=5)
+	req_group.add_argument(
+		"-n", help="number of training repetitions", default=10)
+	req_group.add_argument(
+		"-tag",
+		help="Feature type/description for distinguising runs in results file",
+		default="")
+	req_group.add_argument(
+		"-plot", help="plot feature importances and predictions (t/f)",
+		default="t")
+	
+	# Help
+	if len(sys.argv) == 1:
+		parser.print_help()
+		sys.exit()
+	args = parser.parse_args() # Read arguments from the command line
+	
+	return args
+
+
 def create_balanced(X, n):
 	'''Create balanced training datasets by downsampling the majority class.'''
 	
@@ -89,7 +157,7 @@ def create_balanced(X, n):
 		balanced_data = pd.concat([pos_class, neg_downsampled])
 		
 		# Shuffle the dataset to mix positive and negative samples
-		balanced_data = balanced_data.sample(frac=1, random_state=i)
+		balanced_data = balanced_data.sample(frac=1, random_state=b)
 		
 		# Append this balanced dataset to the list
 		balanced_datasets.append(balanced_data)
@@ -306,7 +374,7 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 		cv_pred = cross_val_predict(
 			best_model, X_train_norm, y_train, cv=k_fold, n_jobs=-1)
 		
-		# Thejesh recommended I look at the individual validation performances #
+		############ Look at the individual validation performances ############
 		# if j==0:
 		# 	for train_idx, val_idx in k_fold.split(X_train_norm, y_train):
 		# 		print('y_train', y_train.iloc[train_idx].value_counts())
@@ -454,12 +522,14 @@ def run_autogluon(X_train, X_test, y_train, y_test, label, path, prefix):
 	os.chdir(f'{path}/{prefix}')
 	
 	# Normalize X and y datasets
-	X_train_norm = MinMaxScaler().fit_transform(X_train)
-	X_test_norm = MinMaxScaler().fit_transform(X_test)
+	X_train_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_train),
+		columns=X_train.columns, index=X_train.index)
+	X_test_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_test),
+		columns=X_test.columns, index=X_test.index)
 	
 	# Combine X and y datasets
-	X_train_norm[label] = y_train.loc[X_train_norm.index,:]
-	X_test_norm[label] = y_test.loc[X_test_norm.index,:]
+	X_train_norm.insert(0, label, y_train[X_train_norm.index])
+	X_test_norm.insert(0, label, y_test[X_test_norm.index])
 	
 	# Model training
 	predictor = TabularPredictor(
@@ -474,67 +544,7 @@ def run_autogluon(X_train, X_test, y_train, y_test, label, path, prefix):
 
 
 if __name__ == "__main__":
-	# Argument parser
-	parser = argparse.ArgumentParser(
-		description="XGBoost Regression on SNP and ORF data")
-	
-	# Required input
-	req_group = parser.add_argument_group(title="Required Input")
-	req_group.add_argument(
-		"-X", help="path to feature table file", required=True)
-	req_group.add_argument(
-		"-y_name", help="name of label in X file", required=True)
-	req_group.add_argument(
-		"-test", help="path to file of test set instances", required=True)
-	req_group.add_argument(
-		"-save", help="path to save output files to", required=True)
-	req_group.add_argument(
-		"-prefix", help="prefix of output file names", required=True)
-	req_group.add_argument(
-		"-alg", help="algorithm to use (xgboost or autogluon)", required=True)
-
-	# Optional input
-	req_group.add_argument(
-		"-Y", help="path to label table file", default="")
-	req_group.add_argument(
-		"-tag",
-		help="Feature type/description for distinguising runs in results file",
-		default="")
-	req_group.add_argument(
-		"-ht",
-		help="define the hyperparameter tuning cross-validation method (Stratified K-Fold (kfold) or Leave-One-Out(loo))",
-		default="kfold")
-	req_group.add_argument(
-		"-fold",
-		help="k number of cross-validation folds for training the best model. This parameter does not change the hyperopt object function fold number.",
-		default=5)
-	req_group.add_argument(
-		"-n", help="number of training repetitions", default=10)
-	req_group.add_argument(
-		"-feat", help="file containing features (from X) to include in model",
-		default="all")
-	req_group.add_argument(
-		"-feat_list",
-		help="comma-separated list of features (from X) to include in model",
-		nargs="+", type=lambda s: [col.strip() for col in s.split(",")],
-		default=[])
-	req_group.add_argument(
-		"-fs", help="whether to perform feature selection or not (y/n)",
-		default="n")
-	req_group.add_argument(
-		"-bal", help="whether to balance the training set or not (y/n)",
-		default="n")
-	req_group.add_argument(
-		"-n_bal", help="number of balanced datasets to create", default=15)
-	req_group.add_argument(
-		"-plot", help="plot feature importances and predictions (t/f)",
-		default="t")
-	
-	# Help
-	if len(sys.argv) == 1:
-		parser.print_help()
-		sys.exit()
-	args = parser.parse_args() # Read arguments
+	args = parse_args()
 	
 	# Read in data
 	X = dt.fread(args.X).to_pandas() # feature table
@@ -577,7 +587,7 @@ if __name__ == "__main__":
 	print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 	print(y_train.value_counts(), y_test.value_counts())
 	
-	if args.balance == 'n':
+	if args.bal == 'n':
 		# Train the model with an imbalanced dataset
 		if args.alg == 'xgboost':
 			start = time.time()
@@ -593,13 +603,14 @@ if __name__ == "__main__":
 		if args.alg == 'autogluon':
 			run_autogluon(X_train, X_test, y_train, y_test, args.y_name, args.save, args.prefix)
 	
-	if args.balance == 'y':
+	if args.bal == 'y':
 		# Train the model with balanced datasets
+		X_train.insert(0, args.y_name, y_train[X_train.index])
 		balanced_datasets = create_balanced(X_train, int(args.n_bal))
 		
 		for b in range(args.n_bal):
 			X_train_bal = balanced_datasets[b].drop(columns=args.y_name)
-			y_train_bal = y_train.loc[X_train_bal.index,:]
+			y_train_bal = y_train[X_train_bal.index]
 			
 			if args.alg == 'xgboost':
 				start = time.time()
