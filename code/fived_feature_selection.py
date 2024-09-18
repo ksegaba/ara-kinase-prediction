@@ -73,10 +73,8 @@ def hyperopt_objective_clf(params, X_train_norm, y_train):
 	Written by Thejesh Mallidi
 	Modified by Kenia Segura Abá
 	'''
-	mod = RandomForestClassifier(**params, random_state=321)
 	
-	# Normalize the data
-	X_train_norm = MinMaxScaler().fit_transform(X_train)
+	mod = RandomForestClassifier(**params, random_state=321)
 	
 	cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 	f1_scorer = make_scorer(f1_score_safe)
