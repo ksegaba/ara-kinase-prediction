@@ -141,6 +141,7 @@ def feature_selection_clf(X_train, y_train, start, stop, step, save, prefix, wri
 	gini = pd.DataFrame(
 		forest.feature_importances_, index=X_train.columns, columns=['gini'])
 	
+	print('Calculating permutation importance...')
 	result = permutation_importance(
 		forest, X_train_norm, y_train, n_repeats=10, random_state=321, n_jobs=2)
 	
