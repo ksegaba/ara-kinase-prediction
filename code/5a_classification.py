@@ -14,9 +14,16 @@ Required Inputs
 	-Y      Path to label matrix file, if label not in X matrix
 	-feat   File containing features (from X) to include in model
 	-feat_list Comma-separated list of features (from X) to include in model
-	-fs     Whether to perform feature selection or not (y/n, default is n)
 	-bal    Balance the training set (y/n, default is n)
 	-n_bal  Number of balanced datasets to create (default is 15)
+	
+	# Optional feature selection arguments
+	-fs     Whether to perform feature selection or not (y/n, default is n)
+	-start  Starting number of features to select
+	-stop   Ending number of features to select
+	-step   Step size for selecting features
+	-write  Write the selected features to a file (y/n, default is n)
+	-type   Feature selection importance measure type (permutation/gini, default is permutation)
 	
 	# Optional arguments for XGBoost
 	-ht     Hyperparameter tuning method (kfold/loo, default is kfold)
@@ -26,7 +33,7 @@ Required Inputs
 	-plot   Plot feature importances and predictions (default is t)
 
 XGBoost outputs for each training repetition (prefixed with <prefix>_)
-	_model_rep_*.save         XGBoost model
+	_model_rep_*.pkl         XGBoost model
 	_top20_rep_*.pdf          Plot of top 20 features' importance scores
 
 XGboost summary outputs (prefixed with <prefix>_)
@@ -43,6 +50,7 @@ About Hyperparameter Tuning
 	colsample_bytree [0.3, 1.0], gamma [0.0, 5.0], alpha [0.0, 5.0],
 	min_child_weight [1, 10, 1], n_estimators [5, 1000, 5]
 """
+
 __author__ = "Kenia Segura Abá"
 
 from configparser import ExtendedInterpolation
@@ -67,7 +75,8 @@ from sklearn.metrics import f1_score, matthews_corrcoef, accuracy_score
 from sklearn.model_selection import cross_val_predict, cross_validate
 from sklearn.model_selection import LeaveOneOut, StratifiedKFold
 from autogluon.tabular import TabularPredictor
-
+sys.path.append('./code')
+from fived_feature_selection import feature_selection_clf
 
 def parse_args():
     # Argument parser
@@ -90,41 +99,57 @@ def parse_args():
 		"-alg", help="algorithm to use (xgboost or autogluon)", required=True)
 
 	# Optional data processing arguments
-	req_group.add_argument(
+	dp_group = parser.add_argument_group(title="Optional Data Processing")
+	dp_group.add_argument(
 		"-Y", help="path to label table file", default="")
-	req_group.add_argument(
+	dp_group.add_argument(
 		"-feat", help="file containing features (from X) to include in model",
 		default="all")
-	req_group.add_argument(
+	dp_group.add_argument(
 		"-feat_list",
 		help="comma-separated list of features (from X) to include in model",
 		nargs="+", type=lambda s: [col.strip() for col in s.split(",")],
 		default=[])
-	req_group.add_argument(
-		"-fs", help="whether to perform feature selection or not (y/n)",
-		default="n")
-	req_group.add_argument(
+	dp_group.add_argument(
 		"-bal", help="whether to balance the training set or not (y/n)",
 		default="n")
-	req_group.add_argument(
+	dp_group.add_argument(
 		"-n_bal", help="number of balanced datasets to create", default=15)
 	
+	# Optional feature selection arguments
+	fs_group = parser.add_argument_group(title="Optional Feature Selection")
+	fs_group.add_argument(
+		"-fs", help="whether to perform feature selection or not (y/n)",
+		default="n")
+	fs_group.add_argument(
+		"-start", help="starting number of features to select", type=int)
+	fs_group.add_argument(
+		"-stop", help="ending number of features to select", type=int)
+	fs_group.add_argument(
+		"-step", help="step size for selecting features", type=float)
+	fs_group.add_argument(
+		"-write", help="write the selected features to a file (y/n)", default="n")
+	fs_group.add_argument(
+		"-type", help="feature selection importance measure type (permutation/gini)",
+		default="permutation")
+	
 	# Optional arguments for XGBoost
-	req_group.add_argument(
+	xgb_group = parser.add_argument_group(title="Optional XGBoost Arguments")
+	xgb_group.add_argument(
 		"-ht",
 		help="define the hyperparameter tuning cross-validation method (Stratified K-Fold (kfold) or Leave-One-Out(loo))",
 		default="kfold")
-	req_group.add_argument(
+	xgb_group.add_argument(
 		"-fold",
 		help="k number of cross-validation folds for training the best model. This parameter does not change the hyperopt object function fold number.",
 		default=5)
-	req_group.add_argument(
+	xgb_group.add_argument(
 		"-n", help="number of training repetitions", default=10)
-	req_group.add_argument(
+	xgb_group.add_argument(
 		"-tag",
 		help="Feature type/description for distinguising runs in results file",
 		default="")
-	req_group.add_argument(
+	xgb_group.add_argument(
 		"-plot", help="plot feature importances and predictions (t/f)",
 		default="t")
 	
@@ -165,6 +190,28 @@ def create_balanced(X, n):
 	return balanced_datasets
 
 
+def xgb_feature_selection(X_train, y_train, step=0.1):
+	'''Run feature selection with XGBoost and return a list of selected features.'''
+	
+	# Train a model with all features
+	dtrain = xgb.DMatrix(X_train, label=y_train)
+	params = {"objective": "binary:logistic", "eval_metric": "logloss"}
+	bst = xgb.train(params, dtrain, num_boost_round=100)
+	
+	# Get feature importance scores
+	importance = bst.get_score(importance_type="weight")
+	importance_df = pd.DataFrame({'Feature': list(importance.keys()), 'Importance': list(importance.values())})
+	importance_df = importance_df.sort_values(by='Importance', ascending=False)
+	
+	# Select the top percentile features every step size
+	selected_features = []
+	for i in np.arange(0, 1, step):
+		n_features = int(i * len(importance_df))
+		selected_features.append(importance_df.iloc[:n_features, 0].tolist())
+	
+	return selected_features
+
+
 def f1_score_safe(y_true, y_pred):
 	'''Calculate the F1 score with zero division handling
 	It resolves the following error:
@@ -192,7 +239,7 @@ def recall_score_safe(y_true, y_pred):
 	return recall_score(y_true, y_pred, zero_division=1)
 
 
-def hyperopt_objective_loo(params):
+def hyperopt_objective_loo(params, X_train, y_train):
 	"""Create the hyperparameter grid and run Hyperopt hyperparameter tuning
 	with Leave-One-Out cross-validation
 	"""
@@ -233,11 +280,11 @@ def hyperopt_objective_loo(params):
 	# Average LOO Accuracy score
 	loo_acc = accuracy_score(loo_actual, loo_preds)
 	
-	# Hyperopt will maximize the F1 score, since it minimizes the objective function loss
+	# Hyperopt will maximize the accuracy, since it minimizes the objective function loss
 	return {'loss': 1-loo_acc, 'status': STATUS_OK}
 
 
-def hyperopt_objective_kfold(params):
+def hyperopt_objective_kfold(params, X_train, y_train):
 	"""
 	Create the hyperparameter grid and run Hyperopt hyperparameter tuning
 	with K-fold cross-validation
@@ -272,19 +319,21 @@ def hyperopt_objective_kfold(params):
 	)
 	
 	# Note: Hyperopt minimizes the objective, so we want to minimize the loss, thereby maximizing the F1 score
-	return -np.mean(validation_loss["test_score"])
+	loss = -np.mean(validation_loss["test_score"])
+	return {'loss': loss, 'status': STATUS_OK}
 
 
-def param_hyperopt(param_grid, max_evals=100, objective_type="loo"):
+def param_hyperopt(param_grid, X_train, y_train, max_evals=100, objective_type="loo"):
 	"""
 	Obtain the best parameters from Hyperopt
 	Written by Thejesh Mallidi
+	Modified by Kenia Segura Abá
 	"""
 	trials = Trials()
 	
 	if objective_type == "loo":
 		params_best = fmin(
-			fn=hyperopt_objective_loo,
+			fn=lambda params: hyperopt_objective_loo(params, X_train, y_train),
 			space=param_grid,
 			algo=tpe.suggest,
 			max_evals=max_evals,
@@ -294,7 +343,7 @@ def param_hyperopt(param_grid, max_evals=100, objective_type="loo"):
 	
 	if objective_type == "kfold":
 		params_best = fmin(
-			fn=hyperopt_objective_kfold,
+			fn=lambda params: hyperopt_objective_kfold(params, X_train, y_train),
 			space=param_grid,
 			algo=tpe.suggest,
 			max_evals=max_evals,
@@ -323,7 +372,7 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 				"eval_metric": "logloss"}
 	
 	start = time.time()
-	best_params, trials = param_hyperopt(parameters, 100, ht)
+	best_params, trials = param_hyperopt(parameters, X_train, y_train, 100, ht)
 	run_time = time.time() - start
 	print("Total hyperparameter tuning time:", run_time)
 	
@@ -350,40 +399,12 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 			eval_metric="logloss",
 			random_state=j)
 		
-		# ####### check if model is learning anything #######
-		# best_model.fit(X_train, y_train)
-		# y_pred = best_model.predict(X_train)
-		# print(y_pred)
-		# roc_auc_train = roc_auc_score(y_train, y_pred)
-		# prec_train = precision_score_safe(y_train, y_pred)
-		# reca_train = recall_score_safe(y_train, y_pred)
-		# f1_train = f1_score_safe(y_train, y_pred)
-		# mcc_train = matthews_corrcoef(y_train, y_pred)
-		# acc_train = accuracy_score(y_train, y_pred)
-		# print("Train ROC-AUC: %f" % (roc_auc_train))
-		# print("Train Precision: %f" % (prec_train))
-		# print("Train Recall: %f" % (reca_train))
-		# print("Train F1: %f" % (f1_train))
-		# print("Train MCC: %f" % (mcc_train))
-		# print("Train Accuracy: %f" % (acc_train))
-		####################################################
-		
 		X_train_norm = MinMaxScaler().fit_transform(X_train) # Normalize
 		
 		k_fold = StratifiedKFold(n_splits=fold, shuffle=True, random_state=j)
 		cv_pred = cross_val_predict(
 			best_model, X_train_norm, y_train, cv=k_fold, n_jobs=-1)
 		
-		############ Look at the individual validation performances ############
-		# if j==0:
-		# 	for train_idx, val_idx in k_fold.split(X_train_norm, y_train):
-		# 		print('y_train', y_train.iloc[train_idx].value_counts())
-		# 		print('X_train_norm', y_train.iloc[val_idx].value_counts())
-				
-		# 		best_model.fit(X_train_norm.iloc[train_idx], y_train.iloc[train_idx])
-		# 		best_model.predict(X_train_norm.iloc[val_idx])
-		########################################################################
-
 		# Performance statistics on validation set
 		roc_auc_val = roc_auc_score(y_train, cv_pred) # Not defined for Leave-One-Out
 		prec_val = precision_score_safe(y_train, cv_pred)  # Precision not defined and set to 0 error
@@ -468,6 +489,7 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	
 	return (results_cv, results_test)
 
+
 def save_xgb_results(results_cv, results_test, args, tag):
 	'''Write training and evaluation performance results to a file.'''
 	
@@ -521,7 +543,7 @@ def run_autogluon(X_train, X_test, y_train, y_test, label, path, prefix):
 	
 	os.chdir(f'{path}/{prefix}')
 	
-	# Normalize X and y datasets
+	# Normalize training and testing datasets
 	X_train_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_train),
 		columns=X_train.columns, index=X_train.index)
 	X_test_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_test),
@@ -587,24 +609,41 @@ if __name__ == "__main__":
 	print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 	print(y_train.value_counts(), y_test.value_counts())
 	
+	# Train the model with an imbalanced dataset
 	if args.bal == 'n':
-		# Train the model with an imbalanced dataset
-		if args.alg == 'xgboost':
-			start = time.time()
-			results_cv, results_test = run_xgb(X_train, y_train, X_test, y_test,
-				args.y_name, int(args.fold), int(args.n), args.prefix, args.ht,
-				args.plot)
-			run_time = time.time() - start
-			print("Training Run Time: %f" % (run_time))
+		if args.fs == 'y': # Run feature selection
+			selected_features = feature_selection_clf(X_train, y_train,
+				args.start, args.stop, args.step, args.save, args.prefix,
+				args.write, args.type)
+			
+			for features in selected_features:
+				X_train_fs = X_train.loc[:, features]
+				X_test_fs = X_test.loc[:, features]
+				
+				if args.alg == 'xgboost':
+					results_cv, results_test = run_xgb(X_train_fs, y_train_fs,
+						X_test, y_test, args.y_name, int(args.fold), int(args.n),
+						f'{args.prefix}_top_{len(features)}', args.ht, args.plot)
+					save_xgb_results(results_cv, results_test, args,
+						f'{args.tag}_top_{len(features)}')
+				
+				if args.alg == 'autogluon':
+					run_autogluon(X_train_fs, X_test_fs, y_train, y_test,
+						args.y_name, args.save, f'{args.prefix}_top_{len(features)}')
 		
-			# Write results to file
-			save_xgb_results(results_cv, results_test, args, args.tag)
-		
-		if args.alg == 'autogluon':
-			run_autogluon(X_train, X_test, y_train, y_test, args.y_name, args.save, args.prefix)
+		else: # No feature selection
+			if args.alg == 'xgboost':
+				results_cv, results_test = run_xgb(X_train, y_train, X_test, y_test,
+					args.y_name, int(args.fold), int(args.n), args.prefix, args.ht,
+					args.plot)
+				save_xgb_results(results_cv, results_test, args, args.tag)
+			
+			if args.alg == 'autogluon':
+				run_autogluon(X_train, X_test, y_train, y_test, args.y_name,
+					args.save, args.prefix)
 	
+	# Train the model with a balanced training dataset
 	if args.bal == 'y':
-		# Train the model with balanced datasets
 		X_train.insert(0, args.y_name, y_train[X_train.index])
 		balanced_datasets = create_balanced(X_train, int(args.n_bal))
 		
@@ -612,17 +651,37 @@ if __name__ == "__main__":
 			X_train_bal = balanced_datasets[b].drop(columns=args.y_name)
 			y_train_bal = y_train[X_train_bal.index]
 			
-			if args.alg == 'xgboost':
-				start = time.time()
-				results_cv, results_test = run_xgb(X_train_bal, y_train_bal,
-					X_test, y_test, args.y_name, int(args.fold), int(args.n),
-					f'{args.prefix}_balanced_{b}', args.ht, args.plot)
-				run_time = time.time() - start
-				print("Training Run Time: %f" % (run_time))
-		
-				# Write results to file
-				save_xgb_results(results_cv, results_test, args, f'{args.tag}_balanced_{b}')
+			if args.fs == 'y': # Run feature selection
+				selected_features = feature_selection_clf(X_train_bal,
+					y_train_bal, args.start, args.stop, args.step, args.save,
+					f'{args.prefix}_balanced_{b}_top_{len(features)}',
+					args.write, args.type)
+				
+				for features in selected_features:
+					X_train_bal_fs = X_train.loc[:, features]
+					X_test_fs = X_test.loc[:, features]
+					
+					if args.alg == 'xgboost':
+						results_cv, results_test = run_xgb(X_train_bal_fs,
+							y_train_bal, X_test_fs, y_test, args.y_name,
+							int(args.fold), int(args.n),
+							f'{args.prefix}_balanced_{b}_top_{len(features)}',
+							args.ht, args.plot)
+						save_xgb_results(results_cv, results_test, args,
+							f'{args.tag}_balanced_{b}_top_{len(features)}')
+					
+					if args.alg == 'autogluon':
+						run_autogluon(X_train_bal_fs, X_test_fs, y_train_bal,
+							y_test, args.y_name, args.save,
+							f'{args.prefix}_balanced_{b}_top_{len(features)}')
 			
-			if args.alg == 'autogluon':
-				run_autogluon(X_train_bal, X_test, y_train_bal, y_test,
-					args.y_name, args.save, f'{args.prefix}_balanced_{b}')
+			else: # No feature selection
+				if args.alg == 'xgboost':
+					results_cv, results_test = run_xgb(X_train_bal, y_train_bal,
+						X_test, y_test, args.y_name, int(args.fold), int(args.n),
+						f'{args.prefix}_balanced_{b}', args.ht, args.plot)
+					save_xgb_results(results_cv, results_test, args, f'{args.tag}_balanced_{b}')
+				
+				if args.alg == 'autogluon':
+					run_autogluon(X_train_bal, X_test, y_train_bal, y_test,
+						args.y_name, args.save, f'{args.prefix}_balanced_{b}')
