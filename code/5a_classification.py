@@ -475,7 +475,7 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	return (results_cv, results_test)
 
 
-def save_xgb_results(results_cv, results_test, args, tag, run_time, nfeats):
+def save_xgb_results(results_cv, results_test, args, tag, run_time, nsamp, nfeats):
 	'''Write training and evaluation performance results to a file.'''
 	
 	results_cv = pd.DataFrame(
@@ -502,8 +502,8 @@ def save_xgb_results(results_cv, results_test, args, tag, run_time, nfeats):
 	
 	out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
 	out.write(f'\n{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t')
-	out.write(f'{run_time}\t{tag}\t{args.y_name}\t{nfeats}\t')
-	out.write(f'{X.shape[1]}\t{int(args.fold)}\t{int(args.n)}\t')
+	out.write(f'{run_time}\t{tag}\t{args.y_name}\t{nsamp}\t')
+	out.write(f'{nfeats}\t{int(args.fold)}\t{int(args.n)}\t')
 	out.write(f'{np.mean(results_cv["ROC-AUC_val"])}\t{np.std(results_cv["ROC-AUC_val"])}\t')
 	out.write(f'{np.mean(results_cv["Precision_val"])}\t{np.std(results_cv["Precision_val"])}\t')
 	out.write(f'{np.mean(results_cv["Recall_val"])}\t{np.std(results_cv["Recall_val"])}\t')
@@ -614,7 +614,8 @@ if __name__ == "__main__":
 						f'{args.prefix}_top_{len(features)}', args.ht, args.plot)
 					run_time = time.time() - start
 					save_xgb_results(results_cv, results_test, args,
-						f'{args.tag}_top_{len(features)}', run_time, len(features))
+						f'{args.tag}_top_{len(features)}', run_time,
+						len(X_train_fs), len(features))
 				
 				if args.alg == 'autogluon':
 					run_autogluon(X_train_fs, X_test_fs, y_train, y_test,
@@ -627,7 +628,8 @@ if __name__ == "__main__":
 					args.y_name, int(args.fold), int(args.n), args.prefix, args.ht,
 					args.plot)
 				run_time = time.time() - start
-				save_xgb_results(results_cv, results_test, args, args.tag, run_time, len(X_train.columns))
+				save_xgb_results(results_cv, results_test, args, args.tag,
+					run_time, len(X_train), len(X_train.columns))
 			
 			if args.alg == 'autogluon':
 				run_autogluon(X_train, X_test, y_train, y_test, args.y_name,
@@ -664,7 +666,7 @@ if __name__ == "__main__":
 						run_time = time.time() - start
 						save_xgb_results(results_cv, results_test, args,
 							f'{args.tag}_balanced_{b}_top_{len(features)}',
-							run_time, len(features))
+							run_time, len(X_train_bal_fs), len(features))
 					
 					if args.alg == 'autogluon':
 						run_autogluon(X_train_bal_fs, X_test_fs, y_train_bal,
@@ -679,7 +681,8 @@ if __name__ == "__main__":
 						f'{args.prefix}_balanced_{b}', args.ht, args.plot)
 					run_time = time.time() - start
 					save_xgb_results(results_cv, results_test, args,
-						f'{args.tag}_balanced_{b}', run_time, len(X_train_bal.columns))
+						f'{args.tag}_balanced_{b}', run_time, len(X_train_bal),
+						len(X_train_bal.columns))
 				
 				if args.alg == 'autogluon':
 					run_autogluon(X_train_bal, X_test, y_train_bal, y_test,
