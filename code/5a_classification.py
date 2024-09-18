@@ -114,7 +114,7 @@ def parse_args():
 		"-bal", help="whether to balance the training set or not (y/n)",
 		default="n")
 	dp_group.add_argument(
-		"-n_bal", help="number of balanced datasets to create", default=15)
+		"-n_bal", help="number of balanced datasets to create", default=15, type=int)
 	
 	# Optional feature selection arguments
 	fs_group = parser.add_argument_group(title="Optional Feature Selection")
@@ -126,7 +126,7 @@ def parse_args():
 	fs_group.add_argument(
 		"-stop", help="ending number of features to select", type=int)
 	fs_group.add_argument(
-		"-step", help="step size for selecting features", type=float)
+		"-step", help="step size for selecting features", type=int)
 	fs_group.add_argument(
 		"-write", help="write the selected features to a file (y/n)", default="n")
 	fs_group.add_argument(
@@ -142,7 +142,7 @@ def parse_args():
 	xgb_group.add_argument(
 		"-fold",
 		help="k number of cross-validation folds for training the best model. This parameter does not change the hyperopt object function fold number.",
-		default=5)
+		default=5, type=int)
 	xgb_group.add_argument(
 		"-n", help="number of training repetitions", default=10)
 	xgb_group.add_argument(
@@ -647,15 +647,14 @@ if __name__ == "__main__":
 		X_train.insert(0, args.y_name, y_train[X_train.index])
 		balanced_datasets = create_balanced(X_train, int(args.n_bal))
 		
-		for b in range(args.n_bal):
+		for b in range(int(args.n_bal)):
 			X_train_bal = balanced_datasets[b].drop(columns=args.y_name)
 			y_train_bal = y_train[X_train_bal.index]
 			
 			if args.fs == 'y': # Run feature selection
 				selected_features = feature_selection_clf(X_train_bal,
 					y_train_bal, args.start, args.stop, args.step, args.save,
-					f'{args.prefix}_balanced_{b}_top_{len(features)}',
-					args.write, args.type)
+					f'{args.prefix}_balanced_{b}', args.write, args.type)
 				
 				for features in selected_features:
 					X_train_bal_fs = X_train.loc[:, features]
