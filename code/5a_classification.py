@@ -471,27 +471,11 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	
 	# Write predictions across reps to file
 	pd.DataFrame.from_dict(preds).to_csv(f"{args.save}/{prefix}_preds.csv")
-
-	# Performance on the training set
-	tmp = pd.DataFrame.from_dict(preds)
-	preds_train = tmp.loc[X_train.index,:]
-	f1_train = preds_train.apply(lambda x: f1_score_safe(y_train, x), axis=1)
-	roc_auc_train = preds_train.apply(lambda x: roc_auc_score(y_train, x), axis=1)
-	prec_train = preds_train.apply(lambda x: precision_score_safe(y_train, x), axis=1)
-	reca_train = preds_train.apply(lambda x: recall_score_safe(y_train, x), axis=1)
-	mcc_train = preds_train.apply(lambda x: matthews_corrcoef(y_train, x), axis=1)
-	acc_train = preds_train.apply(lambda x: accuracy_score(y_train, x), axis=1)
-	print(f"Train F1: {f1_train.mean()}")
-	print(f"Train ROC-AUC: {roc_auc_train.mean()}")
-	print(f"Train Precision: {prec_train.mean()}")
-	print(f"Train Recall: {reca_train.mean()}")
-	print(f"Train MCC: {mcc_train.mean()}")
-	print(f"Train Accuracy: {acc_train.mean()}")
 	
 	return (results_cv, results_test)
 
 
-def save_xgb_results(results_cv, results_test, args, tag):
+def save_xgb_results(results_cv, results_test, args, tag, runtime):
 	'''Write training and evaluation performance results to a file.'''
 	
 	results_cv = pd.DataFrame(
@@ -613,6 +597,7 @@ if __name__ == "__main__":
 	# Train the model with an imbalanced dataset
 	if args.bal == 'n':
 		if args.fs == 'y': # Run feature selection
+			print('Running feature selection...')
 			selected_features = feature_selection_clf(X_train, y_train,
 				args.start, args.stop, args.step, args.save, args.prefix,
 				args.write, args.type)
@@ -623,11 +608,13 @@ if __name__ == "__main__":
 				X_test_fs = X_test.loc[:, features]
 				
 				if args.alg == 'xgboost':
-					results_cv, results_test = run_xgb(X_train_fs, y_train_fs,
+					start = time.time()
+					results_cv, results_test = run_xgb(X_train_fs, y_train,
 						X_test, y_test, args.y_name, int(args.fold), int(args.n),
 						f'{args.prefix}_top_{len(features)}', args.ht, args.plot)
+					run_time = time.time() - start
 					save_xgb_results(results_cv, results_test, args,
-						f'{args.tag}_top_{len(features)}')
+						f'{args.tag}_top_{len(features)}', run_time)
 				
 				if args.alg == 'autogluon':
 					run_autogluon(X_train_fs, X_test_fs, y_train, y_test,
@@ -635,10 +622,12 @@ if __name__ == "__main__":
 		
 		else: # No feature selection
 			if args.alg == 'xgboost':
+				start = time.time()
 				results_cv, results_test = run_xgb(X_train, y_train, X_test, y_test,
 					args.y_name, int(args.fold), int(args.n), args.prefix, args.ht,
 					args.plot)
-				save_xgb_results(results_cv, results_test, args, args.tag)
+				run_time = time.time() - start
+				save_xgb_results(results_cv, results_test, args, args.tag, run_time)
 			
 			if args.alg == 'autogluon':
 				run_autogluon(X_train, X_test, y_train, y_test, args.y_name,
@@ -655,6 +644,7 @@ if __name__ == "__main__":
 			y_train_bal = y_train[X_train_bal.index]
 			
 			if args.fs == 'y': # Run feature selection
+				print('Running feature selection...')
 				selected_features = feature_selection_clf(X_train_bal,
 					y_train_bal, args.start, args.stop, args.step, args.save,
 					f'{args.prefix}_balanced_{b}', args.write, args.type)
@@ -665,13 +655,16 @@ if __name__ == "__main__":
 					X_test_fs = X_test.loc[:, features]
 					
 					if args.alg == 'xgboost':
+						start = time.time()
 						results_cv, results_test = run_xgb(X_train_bal_fs,
 							y_train_bal, X_test_fs, y_test, args.y_name,
 							int(args.fold), int(args.n),
 							f'{args.prefix}_balanced_{b}_top_{len(features)}',
 							args.ht, args.plot)
+						run_time = time.time() - start
 						save_xgb_results(results_cv, results_test, args,
-							f'{args.tag}_balanced_{b}_top_{len(features)}')
+							f'{args.tag}_balanced_{b}_top_{len(features)}',
+							run_time)
 					
 					if args.alg == 'autogluon':
 						run_autogluon(X_train_bal_fs, X_test_fs, y_train_bal,
@@ -680,10 +673,13 @@ if __name__ == "__main__":
 			
 			else: # No feature selection
 				if args.alg == 'xgboost':
+					start = time.time()
 					results_cv, results_test = run_xgb(X_train_bal, y_train_bal,
 						X_test, y_test, args.y_name, int(args.fold), int(args.n),
 						f'{args.prefix}_balanced_{b}', args.ht, args.plot)
-					save_xgb_results(results_cv, results_test, args, f'{args.tag}_balanced_{b}')
+					run_time = time.time() - start
+					save_xgb_results(results_cv, results_test, args,
+						f'{args.tag}_balanced_{b}', run_time)
 				
 				if args.alg == 'autogluon':
 					run_autogluon(X_train_bal, X_test, y_train_bal, y_test,
