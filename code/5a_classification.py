@@ -657,7 +657,7 @@ if __name__ == "__main__":
 					f'{args.prefix}_balanced_{b}', args.write, args.type)
 				
 				for features in selected_features:
-					X_train_bal_fs = X_train.loc[:, features]
+					X_train_bal_fs = X_train_bal.loc[:, features]
 					X_test_fs = X_test.loc[:, features]
 					
 					if args.alg == 'xgboost':
