@@ -184,7 +184,7 @@ def feature_selection_clf(X_train, y_train, start, stop, step, save, prefix, wri
 			selected_features.append(selected)
 		
 		if write == 'y':
-			json.dumps(selected_features,
+			json.dump(selected_features,
 				open(f'{save}/{prefix}_fs_feats_permutation.json', 'w'), indent=2)
 	
 	if type == 'gini':
@@ -195,7 +195,7 @@ def feature_selection_clf(X_train, y_train, start, stop, step, save, prefix, wri
 			selected_features.append(selected)
 		
 		if write == 'y':
-			json.dumps(selected_features,
+			json.dump(selected_features,
 				open(f'{save}/{prefix}_fs_feats_gini.json', 'w'), indent=2)
 	
 	print(f'{len(selected_features)} sets of selected features from {start} to {stop} with step {step}')
