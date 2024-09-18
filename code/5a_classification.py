@@ -399,7 +399,8 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 			eval_metric="logloss",
 			random_state=j)
 		
-		X_train_norm = MinMaxScaler().fit_transform(X_train) # Normalize
+		X_train_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_train),
+			columns=X_train.columns, index=X_train.index) # Normalize
 		
 		k_fold = StratifiedKFold(n_splits=fold, shuffle=True, random_state=j)
 		cv_pred = cross_val_predict(
@@ -455,7 +456,7 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 		# Save predicted labels to file
 		preds[f"rep_{j}"] = pd.concat([pd.Series(cv_pred, index=X_train.index),
 			pd.Series(y_pred, index=X_test.index)], axis=0)
-
+		
 		if plot=="t":
 			# Plot feature importances
 			xgb.plot_importance(
@@ -617,6 +618,7 @@ if __name__ == "__main__":
 				args.write, args.type)
 			
 			for features in selected_features:
+				print(f'Training model with the top {len(features)} features...')
 				X_train_fs = X_train.loc[:, features]
 				X_test_fs = X_test.loc[:, features]
 				
@@ -644,6 +646,7 @@ if __name__ == "__main__":
 	
 	# Train the model with a balanced training dataset
 	if args.bal == 'y':
+		print('Balancing the training set...')
 		X_train.insert(0, args.y_name, y_train[X_train.index])
 		balanced_datasets = create_balanced(X_train, int(args.n_bal))
 		
@@ -657,6 +660,7 @@ if __name__ == "__main__":
 					f'{args.prefix}_balanced_{b}', args.write, args.type)
 				
 				for features in selected_features:
+					print(f'Training model with the top {len(features)} features...')
 					X_train_bal_fs = X_train_bal.loc[:, features]
 					X_test_fs = X_test.loc[:, features]
 					
