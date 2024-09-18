@@ -18,8 +18,8 @@ Arguments:
 	-type: Feature selection importance measure type (permutation/gini) [default: permutation]
 
 Output:
-- Fitted Random Forest model (_model.joblib)
-- Feature importances [gini and permutation] (_importance.csv)
+- Fitted Random Forest model (_fs_model.joblib)
+- Feature importances [gini and permutation] (_fs_importance.csv)
 - Selected features at each step (_fs_feats_permutation.json or _fs_feats_gini.json)
 '''
 
@@ -134,7 +134,7 @@ def feature_selection_clf(X_train, y_train, start, stop, step, save, prefix, wri
 	# Fit the model with the best parameters
 	forest = RandomForestClassifier(**best_params, random_state=321)
 	forest.fit(X_train_norm, y_train)
-	with open(f'{save}/{prefix}_model.joblib', 'wb') as f:
+	with open(f'{save}/{prefix}_fs_model.joblib', 'wb') as f:
 		joblib.dump(forest, f)
 	
 	# Feature permutation importance
@@ -151,7 +151,7 @@ def feature_selection_clf(X_train, y_train, start, stop, step, save, prefix, wri
 		axis=1)
 	importances.sort_values(by='mean', ascending=False, inplace=True)
 	importances = pd.concat([importances, gini], axis=1, ignore_index=False)
-	importances.to_csv(f'{save}/{prefix}_importance.csv')
+	importances.to_csv(f'{save}/{prefix}_fs_importance.csv')
 	
 	# Calculate Feature permutation importance within K-fold cross-validation
 	# start_time = time.time()
