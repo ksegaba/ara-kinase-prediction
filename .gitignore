@@ -3,7 +3,8 @@ data/
 code/.ipynb_checkpoints/
 code/utils_py2/
 external_software/
-output/
+output_clf/
+output_reg/
 logs/
 
 # Files to ignore
