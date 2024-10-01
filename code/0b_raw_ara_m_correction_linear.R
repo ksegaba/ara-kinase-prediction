@@ -58,7 +58,7 @@ for (label in labels){
             set_df$Genotype <- factor(set_df$Genotype, levels=c('WT', 'MA', 'MB', 'DM'))
 
             # Fit a linear model
-            model <- lme4::lmer(paste0(label, ' ~ Genotype + (1|Type) + (1|Flat)'), data = set_df)
+            model <- lmer(paste0(label, ' ~ Genotype + (1|Type) + (1|Flat)'), data = set_df)
 
             # Save the model
             saveRDS(model, paste0('data/20240917_melissa_ara_data/corrected_data/models/Set_', set,
