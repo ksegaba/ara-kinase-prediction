@@ -39,7 +39,7 @@ all = pd.concat([epi_df, evo_df, expr_df, func_df, net_df, prot_df], axis=1,
     ignore_index=False)
 all.shape # (10250, 4791)
 
-# Separate the training and test sets
+# Separate the training and test sets (test set: kinase gene pairs from Cusack 2021)
 instances = pd.read_csv(
     '../20240725_melissa_ara_data/interactions_fitness.csv') # training instances
 instances.MA = instances.MA.str.upper()
@@ -50,8 +50,8 @@ instances.index = instances.index.map(lambda x: x[0] + '_' + x[1]) # convert to 
 instances = instances.loc[:,'Interaction']
 # instances.to_csv('../20240725_melissa_ara_data/interactions_fitness_labels.csv')
 
-train = all.loc[instances.index]
-test = all.drop(index=instances.index)
+train = all.loc[instances.index] # Melissa's gene pairs
+test = all.drop(index=instances.index) # Cusack's kinase gene pairs
 
 # How much missing data is there in the training and test sets?
 train.isna().sum() / train.shape[0] * 100
@@ -109,12 +109,12 @@ of a model to use on this dataset.'''
 os.chdir('/home/seguraab/ara-kinase-prediction')
 X = pd.read_csv('data/Features/Table_features_kept_kinase_prediction_train.csv', index_col=0)
 X_corr = X.T.corr(method='pearson') # correlation between instances across feature values
-test_files = [f for f in os.listdir('data/') if f.startswith('test_ara_m_')]
+test_files = [f for f in os.listdir('data/test_sets_clf/') if f.startswith('test_ara_m_')]
 
 # assign the X_corr index values to the corresponding test file. The test files contain subsets of the X_corr index values.
 X_corr['Test_file'] = ''
 for f in test_files:
-    test = pd.read_csv('data/' + f, header=None)
+    test = pd.read_csv('data/test_sets_clf/' + f, header=None)
     test_corr = X_corr.loc[test[0], test[0]]
     X_corr.loc[test[0], 'Test_file'] = f
 
@@ -198,7 +198,7 @@ for i in range(10):
     
     # assign the X_corr index values to the corresponding test file. The test files contain subsets of the X_corr index values.
     combined_corr['Test_file'] = ''
-    test = pd.read_csv(f'../../test_ara_m_fold_{i}.txt', header=None)
+    test = pd.read_csv(f'../../test_sets_clf/test_ara_m_fold_{i}.txt', header=None)
     combined_corr.loc[test[0], 'Test_file'] = f'test_ara_m_fold_{i}.txt'
     
     # map the test file names to RGB colors
