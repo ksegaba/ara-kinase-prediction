@@ -39,8 +39,8 @@ XGBoost outputs for each training repetition (prefixed with <prefix>_)
 XGboost summary outputs (prefixed with <prefix>_)
 	_imp.csv                  Feature importance scores
 	_preds.csv                Predicted labels
-	RESULTS_xgboost.txt       Aggregated results (various metrics)
- 
+	RESULTS_xgboost.tsv       Aggregated results (various metrics)
+
 About Hyperparameter Tuning
 	Hyperparameter ranges in this script are defined for small datasets in mind.
 	If you have a larger dataset, consider expanding the upper and lower bounds 
@@ -78,8 +78,9 @@ from autogluon.tabular import TabularPredictor
 sys.path.append('./code')
 from fived_feature_selection import feature_selection_clf
 
+
 def parse_args():
-    # Argument parser
+	# Argument parser
 	parser = argparse.ArgumentParser(
 		description="XGBoost Regression on SNP and ORF data")
 	
@@ -190,28 +191,6 @@ def create_balanced(X, n):
 	return balanced_datasets
 
 
-def xgb_feature_selection(X_train, y_train, step=0.1):
-	'''Run feature selection with XGBoost and return a list of selected features.'''
-	
-	# Train a model with all features
-	dtrain = xgb.DMatrix(X_train, label=y_train)
-	params = {"objective": "binary:logistic", "eval_metric": "logloss"}
-	bst = xgb.train(params, dtrain, num_boost_round=100)
-	
-	# Get feature importance scores
-	importance = bst.get_score(importance_type="weight")
-	importance_df = pd.DataFrame({'Feature': list(importance.keys()), 'Importance': list(importance.values())})
-	importance_df = importance_df.sort_values(by='Importance', ascending=False)
-	
-	# Select the top percentile features every step size
-	selected_features = []
-	for i in np.arange(0, 1, step):
-		n_features = int(i * len(importance_df))
-		selected_features.append(importance_df.iloc[:n_features, 0].tolist())
-	
-	return selected_features
-
-
 def f1_score_safe(y_true, y_pred):
 	'''Calculate the F1 score with zero division handling
 	It resolves the following error:
@@ -310,17 +289,17 @@ def hyperopt_objective_kfold(params, X_train, y_train):
 	
 	cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 	f1_scorer = make_scorer(f1_score_safe)
-	validation_loss = cross_validate(
+	validation_f1 = cross_validate(
 		mod, X_train_norm, y_train,
-		scoring="accuracy",
+		scoring=f1_scorer,
 		cv=cv,
 		n_jobs=-1,
 		error_score="raise"
 	)
 	
 	# Note: Hyperopt minimizes the objective, so we want to minimize the loss, thereby maximizing the F1 score
-	loss = -np.mean(validation_loss["test_score"])
-	return {'loss': loss, 'status': STATUS_OK}
+	f1 = np.mean(validation_f1["test_score"])
+	return {'loss': 1-f1, 'status': STATUS_OK}
 
 
 def param_hyperopt(param_grid, X_train, y_train, max_evals=100, objective_type="loo"):
@@ -360,14 +339,27 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	print(f"Training model for {trait}...")
 	
 	###### Hyperparameter tuning with leave-one-out cross-validation #######
-	parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.2), # learning rate
-				"max_depth":scope.int(hp.quniform("max_depth", 2, 6, 1)), # tree depth
-				"subsample": hp.uniform("subsample", 0.7, 1.0), # instances per tree
-				"colsample_bytree": hp.uniform("colsample_bytree", 0.8, 1.0), # features per tree
-				"gamma": hp.uniform("gamma", 0.1, 5.0), # min_split_loss
-				"alpha": hp.uniform("alpha", 0.1, 5.0), # L1 regularization
-				"min_child_weight": scope.int(hp.quniform("min_child_weight", 5, 20, 1)), # minimum sum of instance weight needed in a child
-				"n_estimators": scope.int(hp.quniform("n_estimators", 5, 400, 5)),
+	# Hyperparameter grid for a smaller dataset
+	# parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.2), # learning rate
+	# 			"max_depth":scope.int(hp.quniform("max_depth", 2, 6, 1)), # tree depth
+	# 			"subsample": hp.uniform("subsample", 0.7, 1.0), # instances per tree
+	# 			"colsample_bytree": hp.uniform("colsample_bytree", 0.8, 1.0), # features per tree
+	# 			"gamma": hp.uniform("gamma", 0.1, 5.0), # min_split_loss
+	# 			"alpha": hp.uniform("alpha", 0.1, 5.0), # L1 regularization
+	# 			"min_child_weight": scope.int(hp.quniform("min_child_weight", 5, 20, 1)), # minimum sum of instance weight needed in a child
+	# 			"n_estimators": scope.int(hp.quniform("n_estimators", 5, 400, 5)),
+	# 			"objective": "binary:logistic",
+	# 			"eval_metric": "logloss"}
+	
+	# Hyperparameter grid for a larger dataset
+	parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.3), # learning rate
+				"max_depth":scope.int(hp.quniform("max_depth", 2, 10, 1)), # tree depth
+				"subsample": hp.uniform("subsample", 0.3, 1.0), # instances per tree
+				"colsample_bytree": hp.uniform("colsample_bytree", 0.3, 1.0), # features per tree
+				"gamma": hp.uniform("gamma", 0.0, 5.0), # min_split_loss
+				"alpha": hp.uniform("alpha", 0.0, 5.0), # L1 regularization
+				"min_child_weight": scope.int(hp.quniform("min_child_weight", 1, 10, 1)), # minimum sum of instance weight needed in a child
+				"n_estimators": scope.int(hp.quniform("n_estimators", 5, 1000, 5)),
 				"objective": "binary:logistic",
 				"eval_metric": "logloss"}
 	
@@ -488,8 +480,8 @@ def save_xgb_results(results_cv, results_test, args, tag, run_time, nsamp, nfeat
 		"MCC_test", "Accuracy_test"])
 	
 	# Aggregate results and save to file
-	if not os.path.isfile(f"{args.save}/RESULTS_xgboost.txt"):
-		out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
+	if not os.path.isfile(f"{args.save}/RESULTS_xgboost.tsv"):
+		out = open(f"{args.save}/RESULTS_xgboost.tsv", "a")
 		out.write("Date\tRunTime\tTag\tY\tNumInstances\tNumFeatures")
 		out.write("\tCV_fold\tCV_rep\tROC-AUC_val\tROC-AUC_val_sd\tPrecision_val")
 		out.write("\tPrecision_val_sd\tRecall_val\tRecall_val_sd")
@@ -500,7 +492,7 @@ def save_xgb_results(results_cv, results_test, args, tag, run_time, nsamp, nfeat
 		out.write("\tMCC_test_sd\tAccuracy_test\tAccuracy_test_sd")
 		out.close()
 	
-	out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
+	out = open(f"{args.save}/RESULTS_xgboost.tsv", "a")
 	out.write(f'\n{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t')
 	out.write(f'{run_time}\t{tag}\t{args.y_name}\t{nsamp}\t')
 	out.write(f'{nfeats}\t{int(args.fold)}\t{int(args.n)}\t')
@@ -566,7 +558,7 @@ if __name__ == "__main__":
 	
 	y = y.astype(int) # convert binary bool values to integer
 	
-	test = pd.read_csv(args.test, header=None) # test instances
+	test = dt.fread(args.test, header=False).to_pandas() # test instances
 	
 	# Filter out features not in the given feat file - default: keep all
 	if args.feat != "all":
@@ -582,15 +574,24 @@ if __name__ == "__main__":
 		print(f"New dimensions: {X.shape}")
 	
 	# Train-test split
-	X_train = X.loc[~X.index.isin(test[0])]
-	X_test = X.loc[test[0]]
-	y_train = y.loc[~y.index.isin(test[0])]
-	y_test = y.loc[test[0]]
-	
+	if len(test.columns) > 1: # Features were included in the test file
+		test = dt.fread(args.test).to_pandas() # re-read the test file, include header
+		test.set_index(test.columns[0], inplace=True)
+		y_train = y.copy(deep=True)
+		X_train = X.copy(deep=True)
+		y_test = test.loc[:, args.y_name].astype(int)
+		X_test = test.drop(columns=args.y_name).astype(int)
+		del X, y
+	else:
+		X_train = X.loc[~X.index.isin(test.iloc[:,0])]
+		X_test = X.loc[test.iloc[:,0]]
+		y_train = y.loc[~y.index.isin(test.iloc[:,0])]
+		y_test = y.loc[test.iloc[:,0]]
+		
 	# Ensure rows are in the same order
 	X_train = X_train.loc[y_train.index,:]
 	X_test = X_test.loc[y_test.index,:]
-	
+
 	print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 	print(y_train.value_counts(), y_test.value_counts())
 	
