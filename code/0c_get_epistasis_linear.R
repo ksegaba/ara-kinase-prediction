@@ -6,6 +6,7 @@ library(plyr)
 library(dplyr)
 library(lmerTest)
 library(performance)
+library(emmeans)
 
 # Prepare fitness data
 data <- read_excel(
@@ -29,7 +30,11 @@ pseudolog10 <- function(x){
 
 correct_batch <- function(set_df, label, formula){
   # Correct for batch effects due to flat number (Flat) and location on the flat (Type)
-
+  # Note: Sometimes removing the random effects results in negative numbers.
+  # Thus, instead of removing the batch effects, I will just take into account
+  # the random effects in the linear model but I won't remove their effects to
+  # correct the trait. This function has no purpose now. Leaving for record-keeping.
+  
   model <- lmer(formula, data=set_df)
 
   # Remove random effects from trait
@@ -52,68 +57,46 @@ correct_batch <- function(set_df, label, formula){
   return(list(set_df=set_df, model=model))
 }
 
-get_epi_stats <- function(set, label, model, formula='', set_df=''){
-  # Calculate the epistasis value
-  # print(model)
-  result <- tryCatch({
-    if (formula != '') {
-      model <- lm(formula, data=set_df) # don't leave set_df = '', set it as set_df = set_df
-      e_est <- as.numeric(coef(model)['MA:MB'])
-      lowerCI <- confint(model)['MA:MB',1]
-      upperCI <- confint(model)['MA:MB',2]
-      rsquared <- summary(model)$adj.r.squared
-      pval_e <- as.numeric(summary(model)$coefficients[,4]['MA:MB'])
-    } else {
-      # Extract stats of interaction term
-      e_est <- as.numeric(fixef(model)['MA:MB'])
-      lowerCI <- confint(model, level=0.95)['MA:MB',1]
-      upperCI <- confint(model, level=0.95)['MA:MB',2]
-      r2_model <- r2_nakagawa(model, tolerance=1e-1000)
-      rsquared <- as.numeric(r2_model[[2]]) # Marginal R-squared takes into account only the variance of the fixed effects
-      pval_e <- as.numeric(coef(summary(model))[,'Pr(>|t|)']['MA:MB'])
-    }
-
-    # Return stats
-    return(c(set, e_est, lowerCI, upperCI, rsquared, pval_e, label,  'MA:MB'))
-  }, error = function(e) {
-    warning("An error occurred:", conditionMessage(e))
-    return(c(set, rep(NA, 5), label, 'MA:MB')) # Return a vector of names
-  })
-
-  return(result)
-}
-
-get_epi_stats2 <- function(set, label, model, formula='', set_df=''){
-  # Calculate the epistasis value
+get_epi_stats <- function(set, label, set_df, formula){
+  # Calculate the epistasis values and genotype estimated marginal mean of
+  # the label of interest with a linear model
   
   result <- tryCatch({
-    if (formula != ''){
-      # Use if the label is already batch corrected
-      model <- lm(formula, data=set_df) # don't leave set_df = '', set it as set_df = set_df
-      e_est <- as.numeric(coef(model)['DM'])
-      lowerCI <- confint(model)['DM',1]
-      upperCI <- confint(model)['DM',2]
-      rsquared <- summary(model)$adj.r.squared
-      pval_e <- as.numeric(summary(model)$coefficients[,4]['DM'])
+    model <- lm(formula, data=set_df)
+    # model <- lmer(formula, data=set_df)
 
-    } else {
-      # Extract stats of interaction term
-      e_est <- as.numeric(fixef(model)['DM'])
-      lowerCI <- confint(model, level=0.95)['DM',1]
-      upperCI <- confint(model, level=0.95)['DM',2]
-      r2_model <- r2_nakagawa(model, tolerance=1e-1000)
-      rsquared <- as.numeric(r2_model[[2]]) # Marginal R-squared takes into account only the variance of the fixed effects
-      pval_e <- as.numeric(coef(summary(model))[,'Pr(>|t|)']['DM'])
+    # Extract stats of interaction term
+    e_est <- as.numeric(coef(model)['MA:MB'])
+    lowerCI <- confint(model)['MA:MB',1]
+    upperCI <- confint(model)['MA:MB',2]
+    rsquared <- summary(model)$adj.r.squared
+    pval_e <- as.numeric(summary(model)$coefficients[,4]['MA:MB'])
+
+    # Calculate genotype estimated marginal means
+    emm <- as.data.frame(emmeans(model, ~ MA + MB + MA:MB))
+    emm$Genotype <- ''
+    for (i in 1:nrow(emm)){
+      if (emm$MA[i] == 1 & emm$MB[i] == 1) {
+        emm$Genotype[i] <- 'DM'
+      } else if (emm$MA[i] == 1 & emm$MB[i] == 0) {
+        emm$Genotype[i] <- 'MA'
+      } else if (emm$MA[i] == 0 & emm$MB[i] == 1) {
+        emm$Genotype[i] <- 'MB'
+      } else if (emm$MA[i] == 0 & emm$MB[i] == 0) {
+        emm$Genotype[i] <- 'WT'
+      }
     }
-    
-    # Calculate the estimated marginal means relative to wild type
-    emm <- emmeans(model, '~ MA + MB + MA:MB')
-
+    emm <- rename_with(emm, ~ paste0(label, "_", .))
+    out_df <- left_join(set_df, emm, by=c('Genotype'=paste0(label, '_Genotype')))
+    out_df <- out_df[, !(colnames(out_df) %in% c(paste0(label, '_MA'), paste0(label, '_MB')))]
+  
     # Return stats
-    return(c(set, e_est, lowerCI, upperCI, rsquared, pval_e, label, 'DM'))
+    return(list(
+      results=c(set, e_est, lowerCI, upperCI, rsquared, pval_e, label, 'MA:MB'),
+      out_df=out_df))
   }, error = function(e) {
     warning("An error occurred:", conditionMessage(e))
-    return(c(set, rep(NA, 5), label, 'DM')) # Return a vector of names
+    return(list(results=c(set, rep(NA, 5), label, 'MA:MB'), out_df=set_df)) # Return a vector of names
   })
 
   return(result)
@@ -124,141 +107,129 @@ labels <- c('PG', 'DTB', 'LN', 'DTF', 'SN', 'WO', 'FN', 'SPF', 'TSC', 'SH')
 counter <- 1
 for (label in labels){
   print(paste0('LABEL ', label, ' -----------------------------------------'))
+  
+  join_cols <- c('Set', 'Flat', 'Column', 'Row', 'Number', 'Type', 'Genotype',
+    'Subline', 'MA', 'MB', 'DM', label)
 
   # If the label column is not numeric
-  if (!is.numeric(data[,label])) {
-      data[,label] <- as.numeric(data[[label]])
-  }
+  if (!is.numeric(data[,label])) data[,label] <- as.numeric(data[[label]])
+  
+  # Collect the epistasis values and genotype estimated marginal means for a `label`
+  if (counter == 1) res <- data.frame() # collect epistasis values of the first label
+  if (counter != 1) res2 <- data.frame() # for the other labels
 
-  # Collect epistasis values for each label and the batch corrected data
-  if (counter == 1) {
-    res <- data.frame()
-    batch_corrected_df <- data.frame()
-    # batch_corrected_df2 <- data.frame()
-  }
-
-  if (counter != 1) {
-    res2 <- data.frame()
-    batch_corrected_dfb <- data.frame()
-    # batch_corrected_df2b <- data.frame()
-}
-
-  # Run linear regression per set
-  for (set in unique(data$Set)) {
-    # print(paste0('Set ', set))
-    set_df <- data[data$Set == set, c("Set", "Flat", "Column", "Row",
-                  "Number", "Type", "Genotype", "Subline", "MA", "MB", "DM",
-                  label)] # set data
-
-    # Remove rows with missing values in label
-    set_df <- set_df[!is.na(set_df[,label]),]
-    if (nrow(set_df) == 0) next
-
-    # Batch correction
-    pop_mean <- colMeans(set_df[set_df$Genotype == 'WT', label])
-    set_df$pop_mean <- as.numeric(pop_mean) # population mean
+  # Apply transformations to the ORIGINAL label
+  ## pseudolog10
+  data[, paste0(label, '_plog10')] <- pseudolog10(data[, label])
+  
+  ## add 1 to count traits
+  if (label %in% list('SN', 'WO', 'FN', 'TSC')){
+    data[, paste0(label, '_plus1')] <- data[, label] + 1
     
-    if (length(unique(set_df$Flat)) > 1) {
-      correction_res <- correct_batch(set_df, label, paste0(label, ' ~ MA + MB + MA:MB + pop_mean + (1|Type) + (1|Flat)'))
-      corrected_df <- correction_res$set_df
-      model <- correction_res$model
+    ## calculate the log10
+    data[, paste0(label, '_plus1_log10')] <- log10(data[, paste0(label, '_plus1')])
+  } else {
+    ## calculate the log10
+    data[, paste0(label, '_log10')] <- log10(data[, label])
+  }
+  
+  counter2 <- 1
+  for (new_label in c(label, paste0(label, '_log10'), paste0(label, '_plus1'),
+    paste0(label, '_plog10'), paste0(label, '_plus1_log10'))){
 
-      # correction_res2 <- correct_batch(set_df, label, paste0(label, ' ~ MA + MB + DM + pop_mean + (1|Type) + (1|Flat)'))
-      # corrected_df2 <- correction_res2$set_df
-      # model2 <- correction_res2$model
-    } else {
-      correction_res <- correct_batch(set_df, label, paste0(label, ' ~ MA + MB + MA:MB + pop_mean + (1|Type)'))
-      corrected_df <- correction_res$set_df
-      model <- correction_res$model
+    # Collect the genotype estimated marginal means for a `label`
+    if (counter2 == 1) emm_df <- data.frame() # always original `label`
+    if (counter2 != 1) emm_df2 <- data.frame() # the other transformed labels
 
-      # correction_res2 <- correct_batch(set_df, label, paste0(label, ' ~ MA + MB + DM + pop_mean + (1|Type)'))
-      # corrected_df2 <- correction_res2$set_df
-      # model2 <- correction_res2$model
-    }
+    if (new_label %in% colnames(data)){
 
-    # Apply transformations to the ORIGINAL label --- Fix 10/15/2024
-    ## pseudolog10
-    corrected_df[, paste0(label, '_corrected_plog10')] <- pseudolog10(corrected_df[, paste0(label, '_corrected')])
-    # corrected_df2[, paste0(label, '_corrected_plog10')] <- pseudolog10(corrected_df2[, paste0(label, '_corrected')])
+      # Run linear regression per set
+      progress <- 1
+      for (set in unique(data$Set)) {
 
-    ## add 1 to count traits
-    if (label %in% list('SN', 'WO', 'FN', 'TSC')){
-      corrected_df[, paste0(label, '_corrected_plus1')] <- corrected_df[, paste0(label, '_corrected')] + 1
-      # corrected_df2[, paste0(label, '_corrected_plus1')] <- corrected_df2[, paste0(label, '_corrected')] + 1
-      
-      ## calculate the log10
-      corrected_df[,paste0(label, '_corrected_plus1_log10')] <- log10(corrected_df[, paste0(label, '_corrected_plus1')])
-      # corrected_df2[,paste0(label, '_corrected_plus1_log10')] <- log10(corrected_df2[, paste0(label, '_corrected_plus1')])
-    } else {
-      # calculate the log10
-      corrected_df[,paste0(label, '_corrected_log10')] <- log10(corrected_df[, paste0(label, '_corrected')])
-      # corrected_df2[,paste0(label, '_corrected_log10')] <- log10(corrected_df2[, paste0(label, '_corrected')])
-    }
-
-    # Calculate the epistasis value
-    for (new_label in c(paste0(label, '_corrected'),# paste0(label, '_corrected_log10'),
-      paste0(label, '_corrected_plog10'))){#, # paste0(label, '_corrected_plus1'), 
-      #paste0(label, '_corrected_plus1_log10'))){
-      
-      if (new_label %in% colnames(corrected_df)){
-        if (endsWith(new_label, '_corrected')) {
-          out <- get_epi_stats(set, new_label, model=model) # has MA:MB interaction term
-          # out2 <- get_epi_stats2(set, new_label, model=model2) # has DM term inplace of MA:MB
+        if (label %in% list('SN', 'WO', 'FN', 'TSC')) {
+          set_df <- data[data$Set == set, c("Set", "Flat", "Column", "Row",
+            "Number", "Type", "Genotype", "Subline", "MA", "MB", "DM",
+            label, paste0(label, '_plus1'), paste0(label, '_plus1_log10'),
+            paste0(label, '_plog10'))] # set data
         } else {
-          # if (endsWith(new_label, '_log10')) {
-          #   corrected_df_sub <- corrected_df[!is.infinite(corrected_df[[new_label]]),]
-            # corrected_df2_sub <- corrected_df2[!is.infinite(corrected_df2[[new_label]]),]
-            # if (nrow(corrected_df_sub) == 0 | nrow(corrected_df2_sub) == 0) next
-            # out <- get_epi_stats(set, new_label, '', formula=paste0(new_label, ' ~ MA + MB + MA:MB'), set_df=corrected_df_sub)
-            # out2 <- get_epi_stats2(set, new_label,  '', formula=paste0(new_label, ' ~ MA + MB + DM'), set_df=corrected_df2_sub)
-          # }
-          out <- get_epi_stats(set, new_label, '', formula=paste0(new_label, ' ~ MA + MB + MA:MB'), set_df=corrected_df)
-          # out2 <- get_epi_stats2(set, new_label,  '', formula=paste0(new_label, ' ~ MA + MB + DM'), set_df=corrected_df2)
+            set_df <- data[data$Set == set, c("Set", "Flat", "Column", "Row",
+              "Number", "Type", "Genotype", "Subline", "MA", "MB", "DM",
+              label, paste0(label, '_log10'), paste0(label, '_plog10'))]
         }
+
+        set_df <- set_df[!is.na(set_df[,label]),] # Remove rows with missing values in label
+        if (nrow(set_df) == 0) next # skip sets with no data
+        set_df$Type <- factor(set_df$Type) # set Type as a factor
+
+        # Calculate the population mean
+        pop_mean <- colMeans(set_df[set_df$Genotype == 'WT', new_label])
+        set_df$pop_mean <- as.numeric(pop_mean) # population mean
       
+        # Define the linear equation
+        if (length(unique(set_df$Flat)) > 1) {
+          set_df$Flat <- factor(set_df$Flat)
+          formula <- paste0(new_label, ' ~ MA + MB + MA:MB + pop_mean + Type + Flat')
+        } else {
+          formula <- paste0(new_label, ' ~ MA + MB + MA:MB + pop_mean + Type')
+        }
+
+        # Calculate the epistasis statistics
+        if (endsWith(new_label, '_log10')) { # deal with infinite values
+          set_df_sub <- set_df[!is.infinite(set_df[[new_label]]),]
+          if (nrow(set_df_sub) == 0) {
+            next
+          } else {
+            out <- get_epi_stats(set, new_label, set_df_sub, formula)
+          }
+        } else {
+          out <- get_epi_stats(set, new_label, set_df, formula)
+        }
+
         # Collect the results
-        if (counter == 1) {
-          res <- rbind(res, out) #, out2)
-          batch_corrected_df <- rbind.fill(batch_corrected_df, corrected_df)
-          # batch_corrected_df2 <- rbind.fill(batch_corrected_df2, corrected_df2)
-        }
+        if (counter2 == 1) emm_df <- rbind.fill(emm_df, out$out_df)
+        if (counter2 != 1) emm_df2 <- rbind.fill(emm_df2, out$out_df)
+        if (counter == 1) res <- rbind(res, out$results)
+        if (counter != 1) res2 <- rbind(res2, out$results)
 
-        if (counter != 1) {
-          res2 <- rbind(res2, out) #, out2)
-          batch_corrected_dfb <- rbind.fill(batch_corrected_dfb, corrected_df)
-          # batch_corrected_df2b <- rbind.fill(batch_corrected_df2b, corrected_df2)
-        }
-      } # ensure the transformed label is in the batch corrected data
-    } # all transformed labels are done
-  } # all sets are done
+        # Progress bar
+        cat(paste0('\rProgress: ', progress, ' of ', length(unique(data$Set)),
+          ' sets done for ', new_label, '.\r'))
+        progress <- progress + 1
+      } # all sets are done
 
+      cat('\n') # new progress bar
+    
+      # Combine the genotype estimated marginal means of the transformed labels
+      if (counter2 != 1) {
+        emm_df <- left_join(emm_df, emm_df2, by=join_cols, keep=F)
+      }
+      counter2 <- counter2 + 1
+    } # only if new_label exists
+  } # label and all transformed labels are modeled
+
+  # Combine the epistasis results for all transformed labels to the original label
   if (counter == 1) {
-    colnames(res) <- c('Set', 'e_est', 'lowerCI', 'upperCI', 'rsquared', 'pval_e', 'Label', 'Term')
+    colnames(res) <- c('Set', 'e_est', 'lowerCI', 'upperCI', 'rsquared',
+      'pval_e', 'Label', 'Term')
   }
-
   if (counter != 1) {
-    # epistasis data
-    print(dim(res))
-    print(dim(res2))
-    colnames(res2) <- c('Set', 'e_est', 'lowerCI', 'upperCI', 'rsquared', 'pval_e', 'Label', 'Term')
+    colnames(res2) <- c('Set', 'e_est', 'lowerCI', 'upperCI', 'rsquared',
+      'pval_e', 'Label', 'Term')
     res <- rbind.fill(res, res2)
-
-    # batch corrected data
-    batch_corrected_df <- left_join(batch_corrected_df, batch_corrected_dfb,
-      by=c('Set', 'Flat', 'Column', 'Row', 'Number', 'Type', 'Genotype', 'Subline'), keep=F)
-    # batch_corrected_df2 <- left_join(batch_corrected_df2, batch_corrected_df2b,
-    #   by=c('Set', 'Flat', 'Column', 'Row', 'Number', 'Type', 'Genotype', 'Subline'), keep=F)
   }
+
+  # Save the genotype estimated marginal  means
+  emm_df <- emm_df[, !grepl("\\.x$|\\.y$", colnames(emm_df))]
+  emm_df <- emm_df[, !(colnames(emm_df) %in% c('pop_mean'))]
+  write.table(emm_df, paste0(
+    'data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_',
+    label, '_emmeans.tsv'),
+    row.names=F, quote=F, sep='\t')
+  remove(emm_df, emm_df2, res2) # clear memory
+
   counter <- counter + 1
 }
-
-# Save the batch corrected data
-write.table(batch_corrected_df,
-  paste0('data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_corrected_withInterTerm.tsv'),
-  row.names=F, quote=F, sep='\t')
-# write.table(batch_corrected_df2,
-#   paste0('data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_corrected_withDMTerm.tsv'),
-#   row.names=F, quote=F, sep='\t')
 
 # Determine direction of epistasis
 df_results <- res %>% mutate(
@@ -270,5 +241,5 @@ table(df_results$Label)
 
 # Save the epistasis results
 write.csv(df_results,
-  paste0('data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_corrected_epistasis_linear.csv'),
+  paste0('data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_epistasis_linear.csv'),
   row.names=F, quote=F)
