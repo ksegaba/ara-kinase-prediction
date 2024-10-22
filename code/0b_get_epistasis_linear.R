@@ -4,8 +4,10 @@ library(readxl)
 library(tidyr)
 library(plyr)
 library(dplyr)
+library(CR2) # for ncvMLM
+library(lmtest) # for bptest and dwtest
 library(lmerTest)
-library(performance)
+library(performance) # for lmer epistasis stats and check_autocorrelation
 library(emmeans)
 
 # Prepare fitness data
@@ -17,8 +19,6 @@ data$MA <- 0
 data[data$Genotype == 'MA', 'MA'] <- 1
 data$MB <- 0
 data[data$Genotype == 'MB', 'MB'] <- 1
-data$DM <- 0
-data[data$Genotype == 'DM', 'DM'] <- 1
 data[data$Genotype == 'DM', 'MA'] <- 1
 data[data$Genotype == 'DM', 'MB'] <- 1
 
@@ -34,7 +34,7 @@ correct_batch <- function(set_df, label, formula){
   # Thus, instead of removing the batch effects, I will just take into account
   # the random effects in the linear model but I won't remove their effects to
   # correct the trait. This function has no purpose now. Leaving for record-keeping.
-  
+
   model <- lmer(formula, data=set_df)
 
   # Remove random effects from trait
@@ -57,21 +57,78 @@ correct_batch <- function(set_df, label, formula){
   return(list(set_df=set_df, model=model))
 }
 
-get_epi_stats <- function(set, label, set_df, formula){
-  # Calculate the epistasis values and genotype estimated marginal mean of
+check_assumptions <- function(model, lmer=TRUE){
+  # Check assumptions of the linear model
+  # 1. Normality of the error distribution (Shapiro-Wilk test)
+  # 2. Homoscedasticity (constant variance) of the errors (Breush-Pagan test)
+  # 3. Independence of the errors (Durbin-Watson test)
+  # 4. Linearity and additivity of the relationship between dependent and independent variables (did not check)
+  # Note: I'm not sure why, but the function errors out when an lmer model is 
+  # passed, causing only NA values to be returned. When I run each line by itself,
+  # it works fine. 
+  # In value[[3L]](cond) :
+  # An error occurred:Unable to extract deviance function from model fit
+
+  assumptions <- tryCatch({
+    # Obtain model residuals
+    residuals <- resid(model)
+    fitted_vals <- fitted(model)
+
+    if (lmer == TRUE) {
+      sw_test <- shapiro.test(residuals) # 1. Normality of residuals
+      bp_test <- ncvMLM(model, bp=T) # 2. Homoscedasticity
+      dw_test <- check_autocorrelation(model, nsim=10000)[[1]] # 3. Independence of residuals
+
+      return(list(sw_test$statistic[[1]], sw_test$p.value, 'NA',
+        bp_test, 'NA', dw_test))
+    } else {
+      sw_test <- shapiro.test(residuals)
+      bp_test <- bptest(model)
+      dw_test <- dwtest(model)
+
+      return(list(
+        sw_test$statistic[[1]], sw_test$p.value,
+        bp_test$statistic[[1]], bp_test$p.value[[1]],
+        dw_test$statistic[[1]], dw_test$p.value))
+    }
+  }, error = function(e) {
+    warning('An error occurred:', conditionMessage(e))
+    return(rep(NA, 6)) # Return a vector of NAs
+  })
+
+  return(assumptions)
+}
+
+get_epi_stats <- function(set, label, set_df, formula, lmer=TRUE){
+  # Calculate the epistasis values and genotype estimated marginal means of
   # the label of interest with a linear model
   
   result <- tryCatch({
-    model <- lm(formula, data=set_df)
-    # model <- lmer(formula, data=set_df)
+    if (lmer == TRUE){
+      model <- lmer(formula, data=set_df)
 
-    # Extract stats of interaction term
-    e_est <- as.numeric(coef(model)['MA:MB'])
-    lowerCI <- confint(model)['MA:MB',1]
-    upperCI <- confint(model)['MA:MB',2]
-    rsquared <- summary(model)$adj.r.squared
-    pval_e <- as.numeric(summary(model)$coefficients[,4]['MA:MB'])
+      # Extract the epistasis stats of the interaction term
+      e_est <- as.numeric(fixef(model)['MA:MB'])
+      lowerCI <- confint(model, level=0.95)['MA:MB',1]
+      upperCI <- confint(model, level=0.95)['MA:MB',2]
+      r2_model <- r2_nakagawa(model, tolerance=1e-1000)
+      rsquared <- as.numeric(r2_model[[2]]) # Marginal R-squared takes into account only the variance of the fixed effects
+      pval_e <- as.numeric(coef(summary(model))[,'Pr(>|t|)']['MA:MB'])
 
+    } else {
+      model <- lm(formula, data=set_df)
+
+      # Extract the epistasis stats of the interaction term
+      e_est <- as.numeric(coef(model)['MA:MB'])
+      lowerCI <- confint(model)['MA:MB',1]
+      upperCI <- confint(model)['MA:MB',2]
+      rsquared <- summary(model)$adj.r.squared
+      pval_e <- as.numeric(summary(model)$coefficients[,4]['MA:MB'])
+    }
+    
+    # # Check assumptions (not working for an unknown reason)
+    # assumptions <- check_assumptions(model, lmer)
+    
     # Calculate genotype estimated marginal means
     emm <- as.data.frame(emmeans(model, ~ MA + MB + MA:MB))
     emm$Genotype <- ''
@@ -86,19 +143,20 @@ get_epi_stats <- function(set, label, set_df, formula){
         emm$Genotype[i] <- 'WT'
       }
     }
-    emm <- rename_with(emm, ~ paste0(label, "_", .))
+    emm <- rename_with(emm, ~ paste0(label, '_', .))
     out_df <- left_join(set_df, emm, by=c('Genotype'=paste0(label, '_Genotype')))
     out_df <- out_df[, !(colnames(out_df) %in% c(paste0(label, '_MA'), paste0(label, '_MB')))]
-  
-    # Return stats
-    return(list(
-      results=c(set, e_est, lowerCI, upperCI, rsquared, pval_e, label, 'MA:MB'),
-      out_df=out_df))
-  }, error = function(e) {
-    warning("An error occurred:", conditionMessage(e))
-    return(list(results=c(set, rep(NA, 5), label, 'MA:MB'), out_df=set_df)) # Return a vector of names
-  })
 
+    # Return stats
+    return(list(#assumptions=assumptions,
+      results=c(set, e_est, lowerCI, upperCI, rsquared, pval_e, label, 'MA:MB'),
+      out_df=out_df, model=model))
+  }, error = function(e) {
+    warning('An error occurred:', conditionMessage(e))
+    return(list(#assumptions=rep(NA, 6),
+      results=c(set, rep(NA, 5), label, 'MA:MB'), out_df=set_df, model=NULL))
+  })
+  
   return(result)
 }
 
@@ -109,7 +167,7 @@ for (label in labels){
   print(paste0('LABEL ', label, ' -----------------------------------------'))
   
   join_cols <- c('Set', 'Flat', 'Column', 'Row', 'Number', 'Type', 'Genotype',
-    'Subline', 'MA', 'MB', 'DM', label)
+    'Subline', 'MA', 'MB', label)
 
   # If the label column is not numeric
   if (!is.numeric(data[,label])) data[,label] <- as.numeric(data[[label]])
@@ -134,6 +192,7 @@ for (label in labels){
   }
   
   counter2 <- 1
+  
   for (new_label in c(label, paste0(label, '_log10'), paste0(label, '_plus1'),
     paste0(label, '_plog10'), paste0(label, '_plus1_log10'))){
 
@@ -148,30 +207,26 @@ for (label in labels){
       for (set in unique(data$Set)) {
 
         if (label %in% list('SN', 'WO', 'FN', 'TSC')) {
-          set_df <- data[data$Set == set, c("Set", "Flat", "Column", "Row",
-            "Number", "Type", "Genotype", "Subline", "MA", "MB", "DM",
+          set_df <- data[data$Set == set, c('Set', 'Flat', 'Column', 'Row',
+            'Number', 'Type', 'Genotype', 'Subline', 'MA', 'MB',
             label, paste0(label, '_plus1'), paste0(label, '_plus1_log10'),
             paste0(label, '_plog10'))] # set data
         } else {
-            set_df <- data[data$Set == set, c("Set", "Flat", "Column", "Row",
-              "Number", "Type", "Genotype", "Subline", "MA", "MB", "DM",
+            set_df <- data[data$Set == set, c('Set', 'Flat', 'Column', 'Row',
+              'Number', 'Type', 'Genotype', 'Subline', 'MA', 'MB',
               label, paste0(label, '_log10'), paste0(label, '_plog10'))]
         }
 
         set_df <- set_df[!is.na(set_df[,label]),] # Remove rows with missing values in label
         if (nrow(set_df) == 0) next # skip sets with no data
-        set_df$Type <- factor(set_df$Type) # set Type as a factor
 
-        # Calculate the population mean
-        pop_mean <- colMeans(set_df[set_df$Genotype == 'WT', new_label])
-        set_df$pop_mean <- as.numeric(pop_mean) # population mean
-      
         # Define the linear equation
         if (length(unique(set_df$Flat)) > 1) {
-          set_df$Flat <- factor(set_df$Flat)
-          formula <- paste0(new_label, ' ~ MA + MB + MA:MB + pop_mean + Type + Flat')
+          formula <- paste0(new_label, ' ~ MA + MB + MA:MB + (1|Flat)')
+          lmer <- TRUE
         } else {
-          formula <- paste0(new_label, ' ~ MA + MB + MA:MB + pop_mean + Type')
+          formula <- paste0(new_label, ' ~ MA + MB + MA:MB')
+          lmer <- FALSE
         }
 
         # Calculate the epistasis statistics
@@ -180,17 +235,45 @@ for (label in labels){
           if (nrow(set_df_sub) == 0) {
             next
           } else {
-            out <- get_epi_stats(set, new_label, set_df_sub, formula)
+            if (length(set_df_sub$Genotype) < 4) {
+              next
+            } else {
+              out <- get_epi_stats(set, new_label, set_df_sub, formula, lmer)
+            }
           }
         } else {
-          out <- get_epi_stats(set, new_label, set_df, formula)
+          out <- get_epi_stats(set, new_label, set_df, formula, lmer)
         }
 
-        # Collect the results
-        if (counter2 == 1) emm_df <- rbind.fill(emm_df, out$out_df)
-        if (counter2 != 1) emm_df2 <- rbind.fill(emm_df2, out$out_df)
-        if (counter == 1) res <- rbind(res, out$results)
-        if (counter != 1) res2 <- rbind(res2, out$results)
+        # Check assumptions
+        if (is.null(out$model) == FALSE) {
+          if (lmer == TRUE) {
+            residuals <- resid(out$model)
+            fitted_vals <- fitted(out$model)
+            sw_test <- shapiro.test(residuals) # 1. Normality of residuals
+            bp_test <- ncvMLM(out$model, bp=T) # 2. Homoscedasticity
+            dw_test <- check_autocorrelation(out$model, nsim=10000)[[1]] # 3. Independence of residuals
+            assumptions <- list(sw_test$statistic[[1]], sw_test$p.value, NA,
+              bp_test, NA, dw_test)
+
+          } else {
+            residuals <- resid(out$model)
+            fitted_vals <- fitted(out$model)
+            sw_test <- shapiro.test(residuals)
+            bp_test <- bptest(out$model)
+            dw_test <- dwtest(out$model)
+            assumptions <- list(
+              sw_test$statistic[[1]], sw_test$p.value,
+              bp_test$statistic[[1]], bp_test$p.value[[1]],
+              dw_test$statistic[[1]], dw_test$p.value)
+          }
+
+          # Collect the results
+          if (counter2 == 1) emm_df <- rbind.fill(emm_df, out$out_df)
+          if (counter2 != 1) emm_df2 <- rbind.fill(emm_df2, out$out_df)
+          if (counter == 1) res <- rbind(res, c(out$results, assumptions))
+          if (counter != 1) res2 <- rbind(res2, c(out$results, assumptions))
+        }
 
         # Progress bar
         cat(paste0('\rProgress: ', progress, ' of ', length(unique(data$Set)),
@@ -211,16 +294,18 @@ for (label in labels){
   # Combine the epistasis results for all transformed labels to the original label
   if (counter == 1) {
     colnames(res) <- c('Set', 'e_est', 'lowerCI', 'upperCI', 'rsquared',
-      'pval_e', 'Label', 'Term')
+      'pval_e', 'Label', 'Term', 'sw_test_stat', 'sw_test_pval', 'bp_test_stat',
+      'bp_test_pval', 'dw_test_stat', 'dw_test_pval')
   }
   if (counter != 1) {
     colnames(res2) <- c('Set', 'e_est', 'lowerCI', 'upperCI', 'rsquared',
-      'pval_e', 'Label', 'Term')
+      'pval_e', 'Label', 'Term', 'sw_test_stat', 'sw_test_pval', 'bp_test_stat',
+      'bp_test_pval', 'dw_test_stat', 'dw_test_pval')
     res <- rbind.fill(res, res2)
   }
 
   # Save the genotype estimated marginal  means
-  emm_df <- emm_df[, !grepl("\\.x$|\\.y$", colnames(emm_df))]
+  emm_df <- emm_df[, !grepl('\\.x$|\\.y$', colnames(emm_df))]
   emm_df <- emm_df[, !(colnames(emm_df) %in% c('pop_mean'))]
   write.table(emm_df, paste0(
     'data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_',
