@@ -9,26 +9,13 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import wilcoxon
 
+
 os.chdir('/home/seguraab/ara-kinase-prediction/code')
 
-# Prepare corrected fitness data
-data = dt.fread(
-  '../data/20240917_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09172024_corrected.tsv').\
-  to_pandas()
-  
-data['MA'] = 0
-data.loc[data.Genotype == 'MA', 'MA'] = 1
-data['MB'] = 0
-data.loc[data.Genotype == 'MB', 'MB'] = 1
-data['DM'] = 0
-data.loc[data.Genotype == 'DM', 'DM'] = 1
-data.loc[data.Genotype == 'DM', 'MA'] = 1
-data.loc[data.Genotype == 'DM', 'MB'] = 1
 
-# %%
-# Plot the distributions of MA and MB for each trait
-for label in [l for l in data.columns if '_corrected' in l]:
-	if label=='TSC_corrected':
+def plot_single_mutants(data, labels):
+	# Plot the distributions of MA and MB for each trait
+	for label in labels:
 		MA_vals = data.loc[data.Genotype == 'MA', label]
 		MB_vals = data.loc[data.Genotype == 'MB', label]
 		fig = plt.figure()
@@ -37,24 +24,84 @@ for label in [l for l in data.columns if '_corrected' in l]:
 		plt.title(label)
 		plt.legend()
 		plt.show()
+	
+	return fig
 
-# %%
 
-'''Create all possible pairs of MA and MB rows, then sort the values so that MA 
-is always greater than MB. Calculate the relative fitness, expected DM fitness,
-and epistasis values for the four established genetic interaction definitions'''
+def reshape_data(data, labels):
+	'''Reshape estimated marginal means data to wide format for each label.'''
+	
+	data = data.loc[:, ['Set', 'Genotype'] + labels]
+	data.drop_duplicates(inplace=True)
 
-for label in [l for l in data.columns if '_corrected' in l]:
-    MA_vals = data.loc[data.Genotype == 'MA', label].unique()
-    MB_vals = data.loc[data.Genotype == 'MB', label].unique()
-    DM_vals = data.loc[data.Genotype == 'DM', label].unique()
-    WT_vals = data.loc[data.Genotype == 'WT', label].unique()
-    
-    all_pairs = list(itertools.product(MA_vals, MB_vals)) # all possible pairs
-    all_pairs = [sorted(pair, reverse=True) for pair in all_pairs] # sort pairs
-    
-    # add the DM and WT values to the pairs
-    all_pairs = list(itertools.product(MA_vals, MB_vals, DM_vals, WT_vals))
+	## check each set has 4 genotypes
+	tmp = data.groupby('Set')['Genotype'].value_counts().reset_index('Genotype')
+	print(sum(tmp.groupby('Set')['Genotype'].nunique() == 4) == tmp.index.nunique()) # True
+	del tmp
+
+	dataw = data.pivot_table(index='Set', columns='Genotype', values=labels)
+	dataw.shape # (127, 44)
+	
+	return dataw
+
+
+def sort_single_mutants(dataw, labels):
+	'''Sorts the values of MA and MB so that MA is always greater than MB.
+	dataw: DataFrame in wide format with genotypes as columns and sets as rows.
+	trait: The trait to sort values for (column multi-index level 0).'''
+	
+	sorted_df = dataw.copy(deep=True)
+	for trait in labels:
+		for row in sorted_df.index:
+			if sorted_df.loc[row, (trait, 'MA')] < sorted_df.loc[row, (trait, 'MB')]:
+				tmp_MA = sorted_df.loc[row, (trait, 'MA')]
+				sorted_df.loc[row, (trait, 'MA')] = sorted_df.loc[row, (trait, 'MB')]
+				sorted_df.loc[row, (trait, 'MB')] = tmp_MA
+
+	return sorted_df
+
+
+def calc_relative_fitness(sorted_df):
+	'''Calculates relative fitness for each genotype based on the wild type (WT) genotype.'''
+
+	W_df = sorted_df.copy(deep=True)
+	# note, some sets have WT = 0, so the relative fitness will be undefined.
+	for trait in W_df.columns.levels[0]:
+		W_df.loc[:,trait] = W_df[trait].apply(lambda x: x / x['WT'], axis=1).values
+
+	# Add W_ to column names to denote relative fitness
+	W_df.columns = pd.MultiIndex.from_arrays(
+		[W_df.columns.get_level_values(0).values,
+		'W_' + W_df.columns.get_level_values(1).values])
+
+	return W_df
+
+
+def calc_epistasis(W_df, save_path):
+	'''Calculates epistasis values based on 4 established genetic interaction
+	definitions (Mani 2008) and additional definitions using the relative
+	fitness values of the single mutant genotypes for each trait.'''
+
+	for trait in W_df.columns.levels[0]:
+		W_df[(trait, 'epi_min')] = W_df[trait].apply(
+			lambda x: x['W_DM'] - min(x['W_MA'], x['W_MB']), axis=1).values
+		W_df[(trait, 'epi_product')] = W_df[trait].apply(
+			lambda x: x['W_DM'] - (x['W_MA'] * x['W_MB']), axis=1).values
+		W_df[(trait, 'epi_additive')] = W_df[trait].apply(
+			lambda x: x['W_DM'] - (x['W_MA'] + x['W_MB'] - 1), axis=1).values
+		W_df[(trait, 'epi_log2_mani')] = W_df[trait].apply(
+			lambda x: x['W_DM'] - np.log2((2**x['W_MA'] - 1) * (2**x['W_MB'] - 1) + 1), axis=1).values
+		W_df[(trait, 'epi_mean')] = W_df[trait].apply(
+			lambda x: x['W_DM'] - np.mean([x['W_MA'], x['W_MB']]), axis=1).values
+		W_df[(trait, 'epi_max')] = W_df[trait].apply(
+			lambda x: x['W_DM'] - max(x['W_MA'], x['W_MB']), axis=1).values
+		W_df[(trait, 'epi_log2_additive')] = W_df[trait].apply(
+			lambda x: x['W_DM'] - np.log2(x['W_MA'] * x['W_MB']), axis=1).values
+		W_df[(trait, 'epi_log2_difference')] = W_df[trait].apply(
+			lambda x: x['W_DM'] - np.log2(x['W_MA'] / x['W_MB']), axis=1).values
+
+	W_df.to_csv(save_path, sep='\t')
+	return W_df
 
 # %%
 '''Calculate epistasis values based on 4 established genetic interaction
@@ -65,71 +112,33 @@ epistasis = W_ab - Expected(W_ab)
 - Additive: epistasis = W_ab - (W_a + W_b - 1)
 - Log-additive: epistasis = W_ab - np.log2((2**W_a - 1) * (2**W_b - 1) + 1)'''
 
-# Reshape data to wide format.
-data = data.loc[:, ['Set', 'Genotype', 'GN_emmean', 'PG_emmean', 'DTB_emmean',
-                    'LN_emmean', 'DTF_emmean', 'SN_emmean', 'WO_emmean',
-                    'FN_emmean', 'SPF_emmean', 'TSC_emmean', 'SH_emmean']]
-data.drop_duplicates(inplace=True)
+dir_path = '../data/20240923_melissa_ara_data/corrected_data'
 
-## check each set has 4 genotypes
-tmp = data.groupby('Set')['Genotype'].value_counts().reset_index('Genotype')
-sum(tmp.groupby('Set')['Genotype'].nunique() == 4) == tmp.index.nunique() # True
-del tmp
+for trait in ['PG', 'DTB', 'LN', 'DTF', 'SN', 'WO', 'FN', 'SPF', 'TSC', 'SH']:
+	df = dt.fread(f'{dir_path}/fitness_data_for_Kenia_09232024_{trait}_emmeans.tsv')
+	df = df.to_pandas()
+	
+	if trait in ['SN', 'WO', 'FN', 'TSC']:
+		labels = [f'{trait}_emmean', f'{trait}_plus1_emmean',
+				  f'{trait}_plus1_log10_emmean', f'{trait}_plog10_emmean']
+	else:
+		labels = [f'{trait}_emmean', f'{trait}_log10_emmean',
+				  f'{trait}_plog10_emmean']
 
-dataw = data.pivot_table(index='Set', columns='Genotype',
-  values=['GN_emmean', 'PG_emmean', 'DTB_emmean', 'LN_emmean', 'DTF_emmean',
-  'SN_emmean', 'WO_emmean', 'FN_emmean', 'SPF_emmean', 'TSC_emmean', 'SH_emmean'])
-dataw.shape # (127, 44)
+	# Plot the distributions of MA and MB for each trait
+	plot_single_mutants(df, labels)
 
-# Sort values in MA and MB so that MA is always greater than MB
-for trait in dataw.columns.levels[0]:
-  for row in dataw.index:
-    if dataw.loc[row, (trait, 'MA')] < dataw.loc[row, (trait, 'MB')]:
-      tmp_MA = dataw.loc[row, (trait, 'MA')]
-      dataw.loc[row, (trait, 'MA')] = dataw.loc[row, (trait, 'MB')]
-      dataw.loc[row, (trait, 'MB')] = tmp_MA
+	# Reshape data to wide format.
+	dfw = reshape_data(df, labels)
 
-# First, calculate relative fitness
-# note, some sets have WT = 0, so the relative fitness will be undefined.
-for trait in dataw.columns.levels[0]:
-  dataw.loc[:,trait] = dataw[trait].apply(lambda x: x / x['WT'], axis=1).values
+	# Sort values in MA and MB so that MA is always greater than MB
+	dfw = sort_single_mutants(dfw, labels)
 
-# Add W_ to column names to denote relative fitness
-dataw.columns = pd.MultiIndex.from_arrays(
-  [dataw.columns.get_level_values(0).values,
-   'W_' + dataw.columns.get_level_values(1).values])
+	# First, calculate relative fitness
+	dfw = calc_relative_fitness(dfw)
 
-# Calculate epistasis values
-for trait in dataw.columns.levels[0]:
-  dataw[(trait, 'epi_min')] = dataw[trait].apply(lambda x: x['W_DM'] - min(x['W_MA'], x['W_MB']), axis=1).values
-  dataw[(trait, 'epi_product')] = dataw[trait].apply(lambda x: x['W_DM'] - (x['W_MA'] * x['W_MB']), axis=1).values
-  dataw[(trait, 'epi_additive')] = dataw[trait].apply(lambda x: x['W_DM'] - (x['W_MA'] + x['W_MB'] - 1), axis=1).values
-  dataw[(trait, 'epi_log_mani')] = dataw[trait].apply(lambda x: x['W_DM'] - np.log2((2**x['W_MA'] - 1) * (2**x['W_MB'] - 1) + 1), axis=1).values
-  dataw[(trait, 'epi_mean')] = dataw[trait].apply(lambda x: np.mean([x['W_MA'], x['W_MB']]), axis=1).values
-  dataw[(trait, 'epi_max')] = dataw[trait].apply(lambda x: x['W_DM'] - max(x['W_MA'], x['W_MB']), axis=1).values
-  dataw[(trait, 'epi_log_additive')] = dataw[trait].apply(lambda x: x['W_DM'] - np.log(x['W_MA'] + x['W_MB']), axis=1).values
-  dataw[(trait, 'epi_log_difference')] = dataw[trait].apply(lambda x: x['W_DM'] - np.log(x['W_MA'] - x['W_MB']), axis=1).values
+	# Calculate epistasis values
+	dfw = calc_epistasis(dfw,
+		f'{dir_path}/fitness_data_for_Kenia_09232024_{trait}_emmeans_epistasis.tsv')
 
-dataw.to_csv('../data/20240917_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09172024_corrected_epistasis_emm.csv')
-
-# # Calculate the standard deviation from the standard error for a trait estimated means value
-# n = data.groupby('Set')['Genotype'].value_counts() # number of replicates in each set, per genotype
-# SEs = data[['Set', 'Genotype'] + [col for col in data.columns if '_SE' in col]]
-# SEs.set_index(['Set', 'Genotype'], inplace=True)
-# SEs.drop_duplicates(inplace=True)
-# SDs = SEs.apply(lambda x: x * np.sqrt(n.loc[x.name[0], x.name[1]]), axis=1) # standard deviation
-# SDs = SDs.pivot_table(index='Set', columns='Genotype', values=SDs.columns)
-# SDs.columns = pd.MultiIndex.from_arrays(
-#   [SDs.columns.get_level_values(0).str.replace('_SE', '_SD'),
-#    SDs.columns.get_level_values(1).values]) # rename columns to denote SD
-
-# # Calculate a p-value that compares W_DM to Expected(W_DM)
-# sum(n>30) == len(n) # True, all have more than 30 samples, so we can use a z-test
-# for trait in dataw.columns.levels[0]:
-#   diff = dataw[(trait, 'W_DM')] - dataw[(trait, 'W_DM')]
-
-# # Rows and columns with undefined values
-# with_na = dataw.loc[dataw.isna().any(axis=1)]
-# with_na.loc[:, with_na.isna().any()]
-
-# %%
+	del df, dfw, labels
