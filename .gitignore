@@ -11,3 +11,4 @@ logs/
 code/utils_py2/get-pip.py
 code/utils_py2/Python-2.7.18.tgz
 
+.DS_Store
