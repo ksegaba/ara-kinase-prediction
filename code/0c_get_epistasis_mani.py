@@ -33,12 +33,12 @@ def reshape_data(data, labels):
 	
 	data = data.loc[:, ['Set', 'Genotype'] + labels]
 	data.drop_duplicates(inplace=True)
-
+	
 	## check each set has 4 genotypes
 	tmp = data.groupby('Set')['Genotype'].value_counts().reset_index('Genotype')
 	print(sum(tmp.groupby('Set')['Genotype'].nunique() == 4) == tmp.index.nunique()) # True
 	del tmp
-
+	
 	dataw = data.pivot_table(index='Set', columns='Genotype', values=labels)
 	dataw.shape # (127, 44)
 	
@@ -57,23 +57,23 @@ def sort_single_mutants(dataw, labels):
 				tmp_MA = sorted_df.loc[row, (trait, 'MA')]
 				sorted_df.loc[row, (trait, 'MA')] = sorted_df.loc[row, (trait, 'MB')]
 				sorted_df.loc[row, (trait, 'MB')] = tmp_MA
-
+	
 	return sorted_df
 
 
 def calc_relative_fitness(sorted_df):
 	'''Calculates relative fitness for each genotype based on the wild type (WT) genotype.'''
-
+	
 	W_df = sorted_df.copy(deep=True)
 	# note, some sets have WT = 0, so the relative fitness will be undefined.
 	for trait in W_df.columns.levels[0]:
 		W_df.loc[:,trait] = W_df[trait].apply(lambda x: x / x['WT'], axis=1).values
-
+	
 	# Add W_ to column names to denote relative fitness
 	W_df.columns = pd.MultiIndex.from_arrays(
 		[W_df.columns.get_level_values(0).values,
 		'W_' + W_df.columns.get_level_values(1).values])
-
+	
 	return W_df
 
 
@@ -81,7 +81,7 @@ def calc_epistasis(W_df, save_path):
 	'''Calculates epistasis values based on 4 established genetic interaction
 	definitions (Mani 2008) and additional definitions using the relative
 	fitness values of the single mutant genotypes for each trait.'''
-
+	
 	for trait in W_df.columns.levels[0]:
 		W_df[(trait, 'epi_min')] = W_df[trait].apply(
 			lambda x: x['W_DM'] - min(x['W_MA'], x['W_MB']), axis=1).values
@@ -99,7 +99,7 @@ def calc_epistasis(W_df, save_path):
 			lambda x: x['W_DM'] - np.log2(x['W_MA'] * x['W_MB']), axis=1).values
 		W_df[(trait, 'epi_log2_difference')] = W_df[trait].apply(
 			lambda x: x['W_DM'] - np.log2(x['W_MA'] / x['W_MB']), axis=1).values
-
+	
 	W_df.to_csv(save_path, sep='\t')
 	return W_df
 
@@ -142,3 +142,36 @@ for trait in ['PG', 'DTB', 'LN', 'DTF', 'SN', 'WO', 'FN', 'SPF', 'TSC', 'SH']:
 		f'{dir_path}/fitness_data_for_Kenia_09232024_{trait}_emmeans_epistasis.tsv')
 
 	del df, dfw, labels
+
+# %%
+'''Calculate epistasis values based on 4 established genetic interaction
+definitions (Mani 2008) using the median of each label.'''
+
+dir_path = '../data/20240923_melissa_ara_data/corrected_data'
+
+for trait in ['PG', 'DTB', 'LN', 'DTF', 'SN', 'WO', 'FN', 'SPF', 'TSC', 'SH']:
+	df = dt.fread(f'{dir_path}/fitness_data_for_Kenia_09232024_{trait}_emmeans.tsv')
+	df = df.to_pandas()
+	
+	# Plot the distributions of MA and MB for each trait
+	# plot_single_mutants(df, [trait])
+	
+	# Calculate the median genotype values
+	df['median'] = df.groupby(['Set', 'Genotype'])[trait].transform('median')
+	
+	# Reshape data to wide format.
+	dfw = reshape_data(df, ['median'])
+	dfw.rename(columns={'median': trait}, inplace=True)
+	
+	# Sort values in MA and MB so that MA is always greater than MB
+	dfw = sort_single_mutants(dfw, [trait])
+	
+	# Second, calculate relative fitness
+	dfw = calc_relative_fitness(dfw)
+	
+	# Calculate epistasis values
+	dfw = calc_epistasis(dfw,
+		f'{dir_path}/fitness_data_for_Kenia_09232024_{trait}_medians_epistasis.tsv')
+	
+	del df, dfw
+
