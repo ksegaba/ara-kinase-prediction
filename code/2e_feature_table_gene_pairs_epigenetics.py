@@ -5,13 +5,19 @@ import os
 import numpy as np
 import json
 
+os.chdir('/home/seguraab/ara-kinase-prediction')
+
 # reading the features csv file
-feature_data = pd.read_csv('Feature engineering checklist - 05_Epigenetics.csv')
+# feature_data = pd.read_csv('Feature engineering checklist - 05_Epigenetics.csv')
+feature_data = pd.read_csv('data/Features/05_epigenetics_feature_list.csv')
 feature_data.columns
 
 # Reading the gene_pair files
-instances_dataset_1_file_path = '/home/seguraab/ara-kinase-prediction/data/instances_dataset_1.txt'
+# instances_dataset_1_file_path = '/home/seguraab/ara-kinase-prediction/data/instances_dataset_1.txt'
+instances_dataset_1_file_path = '/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4.txt'
 gene_pairs = pd.read_csv(instances_dataset_1_file_path, delimiter='\t', header=0)
+gene_pairs = gene_pairs["pair_ID"].str.split("_", expand=True)
+gene_pairs.columns = ['gene1', 'gene2']
 gene_pairs.head()
 
 
@@ -105,9 +111,9 @@ for index, row in tqdm(feature_data.iterrows()):
         gene_pairs[feature_name] = apply_transformations(gene_pairs, feature_name)
             
     else:
-        print('Path not founf for the file :', file_path)
+        print('Path not found for the file :', file_path)
 
-        
+
 # Saving the feature matrix/table
-gene_pairs.to_csv("/home/seguraab/ara-kinase-prediction/data/Features/05_epigenetics_gene_pair_features.csv", index = False)
-        
+# gene_pairs.to_csv("/home/seguraab/ara-kinase-prediction/data/Features/05_epigenetics_gene_pair_features.csv", index = False)
+gene_pairs.to_csv("data/2021_cusack_data/Dataset_4_Features/Dataset_4_features_epigenetics.txt", sep='\t', index=False)

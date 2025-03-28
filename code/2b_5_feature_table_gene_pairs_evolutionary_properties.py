@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 '''Create the evolutionary properties feature table for single genes as instances.'''
 
-import os, re, swifter
+import os, swifter
 import numpy as np
 import pandas as pd
 import datatable as dt
@@ -9,7 +9,6 @@ import networkx as nx
 from tqdm import tqdm
 
 __author__ = 'Kenia Segura Abá'
-
 
 def dict_val_counts(dictionary, val_idx=None):
 	'''Similar to pandas value_counts() method. This function counts the number 
@@ -160,11 +159,11 @@ def apply_transformations_df(df):
 		bins.name = column + '_binned'
 		
 		# Calculate the log
-		log_vals = df[column].apply(lambda x: np.log10(x) if x > 0 else np.nan)
+		log_vals = df[column].swifter.apply(lambda x: np.log10(x) if x > 0 else np.nan)
 		log_vals.name = column + '_log'
 		
 		# Calculate the reciprocal
-		reciprocal = df[column].apply(lambda x: 1/x if x != 0 else np.nan)
+		reciprocal = df[column].swifter.apply(lambda x: 1/x if x != 0 else np.nan)
 		reciprocal.name = column + '_reciprocal'
 		
 		# Calculate the square
@@ -189,7 +188,7 @@ def calc_paml_feat_values(cols):
 		print('Applying the calculation:', calc_type)
 		cols_values = genes.swifter.apply(
 			lambda x: calc_continuous_feat_values(
-				x['gene1'], x['gene2'], paml_feat[cols], calc_type),
+				x['gene1'], x['gene2'], paml_feat[cols], calc_type), # type: ignore
 			axis=1)
 		cols_values.columns = cols_values.columns + '_' + calc_type.lower().replace(' ', '_')
 		cols_values.insert(0, 'gene1', genes.gene1)
@@ -221,12 +220,15 @@ if __name__ == '__main__':
 	blast_hits.set_index('gene', inplace=True)
 
 	# Instances file
-	genes = pd.read_csv('data/instances_dataset_1.txt', sep='\t')
-
+	# genes = pd.read_csv('data/instances_dataset_1.txt', sep='\t')
+	genes = pd.read_csv('data/2021_cusack_data/Dataset_4.txt', sep='\t')
+	genes = genes["pair_ID"].str.split("_", expand=True)
+	genes.columns = ['gene1', 'gene2']
+	
 	###################### Calculate the features values #######################
 	features = {}
 
-	# First make the paml features
+	print("First make the paml features...")
 	ka_ks_cols = paml_feat.columns.str.contains('dN/dS')
 	ks_cols = paml_feat.columns.str.contains('_dS_')
 	ka_cols = paml_feat.columns.str.contains('_dN_')
@@ -234,8 +236,8 @@ if __name__ == '__main__':
 	features['Ks'] = calc_paml_feat_values(ks_cols)
 	features['Ka'] = calc_paml_feat_values(ka_cols)
 
-	# Make the reciprocal best match features
-	features['Reciprocal best match'] = calc_binary_adj_feat_values(blast_hits, ml_feat_name)
+	print("Make the reciprocal best match feature...")
+	features['Reciprocal best match'] = calc_binary_adj_feat_values(blast_hits, "binary_reciprocal_best_match")
 	features['Reciprocal best match'].set_index(['gene1', 'gene2'], inplace=True)
 
 	# Make the rest of the features
@@ -253,7 +255,7 @@ if __name__ == '__main__':
 			target_col = '_'.join([feat_type.lower(), feat_name.replace(' ', '_')])
 			values = genes.swifter.apply(
 				lambda x: calc_continuous_feat_values(
-					x['gene1'], x['gene2'], feat1[target_col], calc_type),
+					x['gene1'], x['gene2'], feat1[target_col], calc_type), # type: ignore
 				axis=1)
 			values.name = ml_feat_name
 			values = apply_transformations(values, feat_type)
@@ -265,7 +267,7 @@ if __name__ == '__main__':
 			print(f'Generating feature: {ml_feat_name}')
 			values = genes.swifter.apply(
 				lambda x: calc_continuous_feat_values(
-					x['gene1'], x['gene2'], feat1['continuous_lethality_score'], calc_type),
+					x['gene1'], x['gene2'], feat1['continuous_lethality_score'], calc_type), # type: ignore
 				axis=1)
 			values.name = ml_feat_name
 			values = apply_transformations(values, feat_type)
@@ -276,8 +278,8 @@ if __name__ == '__main__':
 		elif (feat_name == 'lethality') & (feat_type == 'Binary'):
 			print(f'Generating feature: {ml_feat_name}')
 			values = genes.swifter.apply(
-				lambda x: calc_continuous_feat_values(
-					x['gene1'], x['gene2'], feat1['binary_lethality'], calc_type),
+				lambda x: calc_continuous_feat_values(\
+					x['gene1'], x['gene2'], feat1['binary_lethality'], calc_type), # type: ignore
 				axis=1)
 			values.name = ml_feat_name
 			values = apply_transformations(values, feat_type)
@@ -288,11 +290,14 @@ if __name__ == '__main__':
 	# Save the feature table to a file!
 	# pd.concat(features.values(), axis=1, ignore_index=False).to_csv(
 	# 	'data/Features/evolutionary_properties_gene_pairs_features.txt', sep='\t')
+	pd.concat(features.values(), axis=1, ignore_index=False).to_csv(
+		'data/2021_cusack_data/Dataset_4_Features/Dataset_4_features_evolutionary_properties.txt',
+		sep='\t')
 	
 	############### Update the evolutionary properties checklist ###############
 	
 
-	############################################################################
+	'''############################################################################
 	# Check how many of our kinase gene pair instances have single gene lethality data
 	uniq_genes = set(genes.gene1.unique().tolist() + genes.gene2.unique().tolist())
 
@@ -314,4 +319,4 @@ if __name__ == '__main__':
 	from collections import Counter
 	dict_val_counts(Counter(gi_sets_with_dups))
 	pair_sets.intersection(gi_sets) # only 7 gene pairs
-
+	'''

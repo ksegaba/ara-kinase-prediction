@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 '''Create the network properties feature table for gene pairs as instances.'''
 # %%
-import json
+import json, os
 import pandas as pd
 import datatable as dt
 import numpy as np
 import networkx as nx
 
 __author__ = 'Kenia Segura Abá'
+
+os.chdir('/home/seguraab/ara-kinase-prediction')
 
 def calculate_feature_values(df, gene_pairs, feature_type):
     ''' Generate a feature table for a given set of instances (gene pairs) from 
@@ -208,17 +210,20 @@ def assign_feature_column_names(df, feature_name):
 
 # %%
 # Feature checklist file
-checklist = pd.read_csv('../data/2021_cusack_data/06_network_properties_feature_list.csv')
+checklist = pd.read_csv('data/Features/06_network_properties_feature_list.csv')
 
 # Instances file
-gene_pairs = pd.read_csv('/home/seguraab/ara-kinase-prediction/data/instances_dataset_1.txt', sep='\t')
+# gene_pairs = pd.read_csv('/home/seguraab/ara-kinase-prediction/data/instances_dataset_1.txt', sep='\t')
+gene_pairs = pd.read_csv('data/2021_cusack_data/Dataset_4.txt', delimiter='\t', header=0)
+gene_pairs = gene_pairs["pair_ID"].str.split("_", expand=True)
+gene_pairs.columns = ['gene1', 'gene2']
 
 # %%
 # Create the network properties feature table
 for feature_name in checklist['NEW Feature name'].unique():
     if feature_name == 'aranet':
         print("Creating the AraNet features...")
-        adj_mat = dt.fread('../data/Features/network_properties_single_genes_aranet_adjacency_matrix.csv.gz').to_pandas()
+        adj_mat = dt.fread('data/Features/network_properties_single_genes_aranet_adjacency_matrix.csv.gz').to_pandas()
         adj_mat.set_index('gene', inplace=True)
         
         aranet_features = calculate_feature_values(adj_mat, gene_pairs, 'continuous') # calculate continuous feature values
@@ -233,7 +238,7 @@ for feature_name in checklist['NEW Feature name'].unique():
     #
     if feature_name == 'all clust':
         print("Creating the co-expression features...")
-        co_expr = dt.fread('../data/Features/network_properties_single_genes_co_expression_clusters.csv').to_pandas()
+        co_expr = dt.fread('data/Features/network_properties_single_genes_co_expression_clusters.csv').to_pandas()
         co_expr.set_index('gene', inplace=True)
         
         co_expr_features = calculate_feature_values(co_expr, gene_pairs, 'binary') # calculate binary feature values
@@ -247,7 +252,7 @@ for feature_name in checklist['NEW Feature name'].unique():
     #
     if feature_name == 'ppi':
         print("Creating the PPI features...")
-        adj_mat = dt.fread('../data/Features/network_properties_single_genes_ppi_adjacency_matrix.csv.gz').to_pandas()
+        adj_mat = dt.fread('data/Features/network_properties_single_genes_ppi_adjacency_matrix.csv.gz').to_pandas()
         adj_mat.set_index('gene', inplace=True)
         
         ppi_features = calculate_feature_values(adj_mat, gene_pairs, 'continuous') # calculate continuous feature values
@@ -270,8 +275,9 @@ if (aranet_features.gene1.equals(co_expr_features.gene1)) &\
     feat_table = pd.concat([aranet_features, co_expr_features.iloc[:, 2:],
                         ppi_features.iloc[:, 2:]], axis=1)
     
-    print("Saving the feature table to ../data/Features/network_properties_gene_pairs_features.csv")
-    feat_table.to_csv('../data/Features/network_properties_gene_pairs_features.csv', index=False)
+    print("Saving the feature table to data/Features/network_properties_gene_pairs_features.csv")
+    # feat_table.to_csv('data/Features/network_properties_gene_pairs_features.csv', index=False)
+    feat_table.to_csv('data/2021_cusack_data/Dataset_4_Features/Dataset_4_features_network_properties.txt', sep='\t', index=False)
     
     print("Feature table dimensions:", feat_table.shape)
     print("Checklist file dimensions:", checklist.shape)
