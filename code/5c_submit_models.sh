@@ -3,6 +3,35 @@
 conda activate py310
 cd ara-kinase-prediction
 
+''' Run Cusack 2021 dataset through the lab RF pipeline to determine if my
+XGBoost and AutoGluon classification code are working correctly.'''
+
+## XGBoost
+# Original Dataset 4 from Cusack 2021
+python code/5a_classification.py \
+	-X data/2021_cusack_data/Dataset_4.txt \
+	-y_name Class -cl_list negative,positive \
+	-test data/2021_cusack_data/Dataset_4_test_instances.txt \
+	-save data/2021_cusack_data/output_clf \
+	-prefix xgb_clf_original_Dataset_4 \
+	-alg xgboost -bal y -n_bal 100 \
+	-tag debug_xgb_clf_with_cusack_2021 \
+	-ht kfold -fold 5 -n 10 -feat all -plot f
+
+# Imputed Dataset 4 from features we re-generated
+python code/5a_classification.py \
+	-X data/2021_cusack_data/Dataset_4_Features/Imputed_Dataset_4_final_table.csv \
+	-y_name Class -cl_list negative,positive \
+	-test data/2021_cusack_data/Dataset_4_test_instances.txt \
+	-save data/2021_cusack_data/Dataset_4_Features/output_clf \
+	-prefix xgb_clf_imputed_Dataset_4 \
+	-alg xgboost -bal y -n_bal 100 \
+	-tag debug_xgb_clf_with_cusack_2021 \
+	-ht kfold -fold 5 -n 10 -feat all -plot f
+
+## RandomForest
+
+
 # :'''Preliminary classification models with the 603 features that contained no ############################# re-run these, 9/18/2024 (bc I added normalization)
 # missing data. Hyperparameter tuning was implemented with two methods:
 # Stratified K-Fold Cross-Validation and Leave-One-Out Cross-Validation.
@@ -89,3 +118,34 @@ done
 Hyperparameter tuning was implemented with two methods:
 Stratified K-Fold Cross-Validation and Leave-One-Out Cross-Validation.
 '''
+labels=(TSC_plog10_emmean.epi_min TSC_plog10_emmean.epi_product
+TSC_plog10_emmean.epi_additive TSC_plog10_emmean.epi_log2_mani
+TSC_plog10_emmean.epi_mean TSC_plog10_emmean.epi_max
+TSC_plog10_emmean.epi_log2_additive
+TSC_plog10_emmean.epi_log2_difference TSC_plus1_emmean.epi_min
+TSC_plus1_emmean.epi_product TSC_plus1_emmean.epi_additive
+TSC_plus1_emmean.epi_log2_mani TSC_plus1_emmean.epi_mean
+TSC_plus1_emmean.epi_max TSC_plus1_emmean.epi_log2_additive
+TSC_plus1_emmean.epi_log2_difference
+TSC_plus1_log10_emmean.epi_min TSC_plus1_log10_emmean.epi_product
+TSC_plus1_log10_emmean.epi_additive
+TSC_plus1_log10_emmean.epi_log2_mani
+TSC_plus1_log10_emmean.epi_mean TSC_plus1_log10_emmean.epi_max
+TSC_plus1_log10_emmean.epi_log2_additive
+TSC_plus1_log10_emmean.epi_log2_difference)
+
+for i in {0..9}; do
+	for label in "${labels[@]}"; do
+		# Stratified K-Fold Cross-Validation Hyperparameter Tuning Method
+		python code/5b_regression.py \
+			-X data/Features/imputed_features/Table_features_imputed_kinase_prediction_train_test_ara_m_fold_${i}.csv \
+			-drop Y \
+			-Y data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_TSC_emmeans_epistasis_regression_labels.csv \
+			-y_name $label \
+			-test data/test_sets_clf/20240725_ara_m_test_sets_old_clf_label/test_ara_m_fold_${i}.txt \
+			-save /home/seguraab/ara-kinase-prediction/output_reg/ara_m_kfold_ht_2259_imp_feats \
+			-prefix ara_m_kfold_ht_2259_imp_feats_test_${label}_${i} \
+			-tag ara_m_kfold_ht_2259_imp_feats_test_${label}_${i} \
+			-alg xgboost -ht kfold -fold 5 -n 10 -feat all -plot f
+	done
+done
