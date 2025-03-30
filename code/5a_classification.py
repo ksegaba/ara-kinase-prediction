@@ -104,6 +104,10 @@ def parse_args():
 	dp_group.add_argument(
 		"-Y", help="path to label table file", default="")
 	dp_group.add_argument(
+		"-cl_list", help="list of class categories if they are not binary (0 & 1)",
+		nargs="+", type=lambda s: [cl.strip() for cl in s.split(",")],
+		default=[0, 1])  # default is binary classification
+	dp_group.add_argument(
 		"-feat", help="file containing features (from X) to include in model",
 		default="all")
 	dp_group.add_argument(
@@ -163,12 +167,12 @@ def parse_args():
 	return args
 
 
-def create_balanced(X, n):
+def create_balanced(X, n, y_name):
 	'''Create balanced training datasets by downsampling the majority class.'''
 	
 	# Split the data into positive and negative classes
-	pos_class = X[X['Y'] == 1]
-	neg_class = X[X['Y'] == 0]
+	pos_class = X[X[y_name] == 1]
+	neg_class = X[X[y_name] == 0]
 	
 	num_datasets = n
 	balanced_datasets = []
@@ -260,7 +264,7 @@ def hyperopt_objective_loo(params, X_train, y_train):
 	loo_acc = accuracy_score(loo_actual, loo_preds)
 	
 	# Hyperopt will maximize the accuracy, since it minimizes the objective function loss
-	return {'loss': 1-loo_acc, 'status': STATUS_OK}
+	 
 
 
 def hyperopt_objective_kfold(params, X_train, y_train):
@@ -338,45 +342,44 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	""" Train XGBoost Classification Model """
 	print(f"Training model for {trait}...")
 	
-	###### Hyperparameter tuning with leave-one-out cross-validation #######
-	# Hyperparameter grid for a smaller dataset
-	# parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.2), # learning rate
-	# 			"max_depth":scope.int(hp.quniform("max_depth", 2, 6, 1)), # tree depth
-	# 			"subsample": hp.uniform("subsample", 0.7, 1.0), # instances per tree
-	# 			"colsample_bytree": hp.uniform("colsample_bytree", 0.8, 1.0), # features per tree
-	# 			"gamma": hp.uniform("gamma", 0.1, 5.0), # min_split_loss
-	# 			"alpha": hp.uniform("alpha", 0.1, 5.0), # L1 regularization
-	# 			"min_child_weight": scope.int(hp.quniform("min_child_weight", 5, 20, 1)), # minimum sum of instance weight needed in a child
-	# 			"n_estimators": scope.int(hp.quniform("n_estimators", 5, 400, 5)),
-	# 			"objective": "binary:logistic",
-	# 			"eval_metric": "logloss"}
-	
-	# Hyperparameter grid for a larger dataset
-	parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.3), # learning rate
-				"max_depth":scope.int(hp.quniform("max_depth", 2, 10, 1)), # tree depth
-				"subsample": hp.uniform("subsample", 0.3, 1.0), # instances per tree
-				"colsample_bytree": hp.uniform("colsample_bytree", 0.3, 1.0), # features per tree
-				"gamma": hp.uniform("gamma", 0.0, 5.0), # min_split_loss
-				"alpha": hp.uniform("alpha", 0.0, 5.0), # L1 regularization
-				"min_child_weight": scope.int(hp.quniform("min_child_weight", 1, 10, 1)), # minimum sum of instance weight needed in a child
-				"n_estimators": scope.int(hp.quniform("n_estimators", 5, 1000, 5)),
-				"objective": "binary:logistic",
-				"eval_metric": "logloss"}
-	
-	start = time.time()
-	best_params, trials = param_hyperopt(parameters, X_train, y_train, 100, ht)
-	run_time = time.time() - start
-	print("Total hyperparameter tuning time:", run_time)
-	
 	############# Training with Stratified K-Fold Cross-Validation #############
 	results_cv = [] # hold performance metrics of cv reps
 	results_test = [] # hold performance metrics on test set
 	feature_imp = pd.DataFrame(index=X_train.columns)
 	preds = {}
 	
-	# Stratified K-Fold Cross-validation
 	for j in range(0, n): # repeat cv 10 times
 		print(f"Running {j+1} of {n}")
+		###### Hyperparameter tuning with leave-one-out cross-validation #######
+		# Hyperparameter grid for a smaller dataset
+		# parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.2), # learning rate
+		# 			"max_depth":scope.int(hp.quniform("max_depth", 2, 6, 1)), # tree depth
+		# 			"subsample": hp.uniform("subsample", 0.7, 1.0), # instances per tree
+		# 			"colsample_bytree": hp.uniform("colsample_bytree", 0.8, 1.0), # features per tree
+		# 			"gamma": hp.uniform("gamma", 0.1, 5.0), # min_split_loss
+		# 			"alpha": hp.uniform("alpha", 0.1, 5.0), # L1 regularization
+		# 			"min_child_weight": scope.int(hp.quniform("min_child_weight", 5, 20, 1)), # minimum sum of instance weight needed in a child
+		# 			"n_estimators": scope.int(hp.quniform("n_estimators", 5, 400, 5)),
+		# 			"objective": "binary:logistic",
+		# 			"eval_metric": "logloss"}
+		
+		# Hyperparameter grid for a larger dataset
+		parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.3), # learning rate
+					"max_depth":scope.int(hp.quniform("max_depth", 2, 10, 1)), # tree depth
+					"subsample": hp.uniform("subsample", 0.3, 1.0), # instances per tree
+					"colsample_bytree": hp.uniform("colsample_bytree", 0.3, 1.0), # features per tree
+					"gamma": hp.uniform("gamma", 0.0, 5.0), # min_split_loss
+					"alpha": hp.uniform("alpha", 0.0, 5.0), # L1 regularization
+					"min_child_weight": scope.int(hp.quniform("min_child_weight", 1, 10, 1)), # minimum sum of instance weight needed in a child
+					"n_estimators": scope.int(hp.quniform("n_estimators", 5, 1000, 5)),
+					"objective": "binary:logistic",
+					"eval_metric": "logloss"}
+		
+		start = time.time()
+		best_params, trials = param_hyperopt(parameters, X_train, y_train, 100, ht)
+		run_time = time.time() - start
+		print("Total hyperparameter tuning time:", run_time)
+		
 		# Build model using the best parameters
 		best_model = xgb.XGBClassifier(
 			eta=best_params["learning_rate"],
@@ -392,11 +395,11 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 			random_state=j)
 		
 		X_train_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_train),
-			columns=X_train.columns, index=X_train.index) # Normalize
+			columns=X_train.columns, index=X_train.index) # Normalize features
 		
 		k_fold = StratifiedKFold(n_splits=fold, shuffle=True, random_state=j)
 		cv_pred = cross_val_predict(
-			best_model, X_train_norm, y_train, cv=k_fold, n_jobs=-1)
+			best_model, X_train_norm, y_train, cv=k_fold, n_jobs=-1) # Stratified K-Fold Cross-Validation
 		
 		# Performance statistics on validation set
 		roc_auc_val = roc_auc_score(y_train, cv_pred) # Not defined for Leave-One-Out
@@ -419,21 +422,26 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 		best_model.fit(X_train_norm, y_train)
 		y_pred = best_model.predict(X_test_norm)
 		
-		# Performance on the test set
-		roc_auc_test = roc_auc_score(y_test, y_pred)
-		prec_test = precision_score_safe(y_test, y_pred)
-		reca_test = recall_score_safe(y_test, y_pred)
-		f1_test = f1_score_safe(y_test, y_pred)
-		mcc_test = matthews_corrcoef(y_test, y_pred)
-		acc_test = accuracy_score(y_test, y_pred)
-		print("Test ROC-AUC: %f" % (roc_auc_test))
-		print("Test Precision: %f" % (prec_test))
-		print("Test Recall: %f" % (reca_test))
-		print("Test F1: %f" % (f1_test))
-		print("Test MCC: %f" % (mcc_test))
-		print("Test Accuracy: %f" % (acc_test))
+		if len(y_test.unique()) > 1:
+			# Performance on the test set
+			roc_auc_test = roc_auc_score(y_test, y_pred)
+			prec_test = precision_score_safe(y_test, y_pred)
+			reca_test = recall_score_safe(y_test, y_pred)
+			f1_test = f1_score_safe(y_test, y_pred)
+			mcc_test = matthews_corrcoef(y_test, y_pred)
+			acc_test = accuracy_score(y_test, y_pred)
+			print("Test ROC-AUC: %f" % (roc_auc_test))
+			print("Test Precision: %f" % (prec_test))
+			print("Test Recall: %f" % (reca_test))
+			print("Test F1: %f" % (f1_test))
+			print("Test MCC: %f" % (mcc_test))
+			print("Test Accuracy: %f" % (acc_test))
+		else:
+			# If the test set has only one class, we cannot calculate these metrics
+			roc_auc_test = prec_test = reca_test = f1_test = mcc_test = acc_test = -1
+		
 		result_test = [roc_auc_test, prec_test, reca_test,
-			f1_test, mcc_test, acc_test]
+					   f1_test, mcc_test, acc_test]
 		results_test.append(result_test)
 		
 		# Save the fitted model to a file
@@ -556,10 +564,6 @@ if __name__ == "__main__":
 		Y = args.Y
 		y = Y.loc[:, args.y_name]
 	
-	y = y.astype(int) # convert binary bool values to integer
-	
-	test = dt.fread(args.test, header=False).to_pandas() # test instances
-	
 	# Filter out features not in the given feat file - default: keep all
 	if args.feat != "all":
 		print("Using subset of features from: %s" % args.feat)
@@ -574,12 +578,13 @@ if __name__ == "__main__":
 		print(f"New dimensions: {X.shape}")
 	
 	# Train-test split
+	test = dt.fread(args.test, header=False).to_pandas() # test instances
 	if len(test.columns) > 1: # Features were included in the test file
 		test = dt.fread(args.test).to_pandas() # re-read the test file, include header
 		test.set_index(test.columns[0], inplace=True)
 		y_train = y.copy(deep=True)
 		X_train = X.copy(deep=True)
-		y_test = test.loc[:, args.y_name].astype(int)
+		y_test = test.loc[:, args.y_name]
 		X_test = test.drop(columns=args.y_name).astype(int)
 		del X, y
 	else:
@@ -587,7 +592,17 @@ if __name__ == "__main__":
 		X_test = X.loc[test.iloc[:,0]]
 		y_train = y.loc[~y.index.isin(test.iloc[:,0])]
 		y_test = y.loc[test.iloc[:,0]]
-		
+	
+	# Convert classes to binary if not already
+	y_class_map = {}
+	if list(y_train.unique()) != [0, 1]:
+		y_class_map[args.cl_list[0][0]] = 0
+		y_class_map[args.cl_list[0][1]] = 1
+	
+	print("New classes:", y_class_map)
+	y_train = y_train.replace(y_class_map)
+	print(y_train, y_test)
+
 	# Ensure rows are in the same order
 	X_train = X_train.loc[y_train.index,:]
 	X_test = X_test.loc[y_test.index,:]
@@ -640,7 +655,7 @@ if __name__ == "__main__":
 	if args.bal == 'y':
 		print('Balancing the training set...')
 		X_train.insert(0, args.y_name, y_train[X_train.index])
-		balanced_datasets = create_balanced(X_train, int(args.n_bal))
+		balanced_datasets = create_balanced(X_train, int(args.n_bal), args.y_name)
 		
 		for b in range(int(args.n_bal)):
 			X_train_bal = balanced_datasets[b].drop(columns=args.y_name)
