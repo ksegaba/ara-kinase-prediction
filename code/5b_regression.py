@@ -14,6 +14,7 @@ Required Inputs
 	-Y      Path to label matrix file, if label not in X matrix
 	-feat   File containing features (from X) to include in model
 	-feat_list Comma-separated list of features (from X) to include in model
+	-drop   Comma-separated list of features (from X) to drop
 
 	# Optional feature selection arguments
 	-fs     Whether to perform feature selection or not (y/n, default is n)
@@ -70,7 +71,7 @@ from sklearn.model_selection import LeaveOneOut, StratifiedKFold
 from sklearn.preprocessing import KBinsDiscretizer
 from autogluon.tabular import TabularPredictor
 sys.path.append("./code")
-from fived_feature_selection import feature_selection_reg
+from fived_feature_selection import feature_selection_clf
 
 def parse_args():
 	# Argument parser
@@ -102,6 +103,10 @@ def parse_args():
 	dp_group.add_argument(
 		"-feat_list",
 		help="comma-separated list of features (from X) to include in model",
+		nargs="+", type=lambda s: [col.strip() for col in s.split(",")],
+		default=[])
+	dp_group.add_argument(
+		"-drop", help="comma-separated list of features (from X) to drop",
 		nargs="+", type=lambda s: [col.strip() for col in s.split(",")],
 		default=[])
 	
@@ -172,7 +177,7 @@ def hyperopt_objective_loo(params, X_train, y_train):
 	)
 	
 	# Normalize the data
-	X_train_norm = MinMaxScaler().fit_transform(X_train)
+	X_train_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_train), columns=X_train.columns, index=X_train.index)
 	
 	# Leave-One-Out Cross-Validation
 	loo = LeaveOneOut()
@@ -213,7 +218,8 @@ def hyperopt_objective_kfold(params, X_train, y_train):
 	)
 	
 	# Normalize the data
-	X_train_norm = MinMaxScaler().fit_transform(X_train)
+	X_train_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_train),
+		columns=X_train.columns, index=X_train.index)
 	
 	# Bin y_train for stratified K-fold sampling
 	discretizer = KBinsDiscretizer(n_bins=10, encode="ordinal", strategy="quantile")
@@ -268,8 +274,8 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	print(f"Training model for {trait}...")
 	
 	########################## Hyperparameter tuning ###########################
-	parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.2), # learning rate
-				"max_depth":scope.int(hp.quniform("max_depth", 2, 6, 1)), # tree depth
+	parameters = {"learning_rate":hp.uniform("learning_rate", 0.01, 0.3), # learning rate
+				"max_depth":scope.int(hp.quniform("max_depth", 2, 10, 1)), # tree depth
 				"subsample": hp.uniform("subsample", 0.7, 1.0), # instances per tree
 				"colsample_bytree": hp.uniform("colsample_bytree", 0.8, 1.0), # features per tree
 				"gamma": hp.uniform("gamma", 0.1, 5.0), # min_split_loss
@@ -288,7 +294,7 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	results_cv = [] # hold performance metrics of cv reps
 	results_test = [] # hold performance metrics on test set
 	feature_imp = pd.DataFrame(index=X_train.columns)
-	preds = {}
+	y_preds =  pd.DataFrame(pd.concat([y_train, y_test], axis=0).copy(deep=True))
 	
 	# Stratified K-Fold Cross-validation
 	for j in range(0, n): # repeat cv 10 times
@@ -316,54 +322,50 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 		y_train_binned = pd.Series(y_train_binned, index=y_train.index)
 		
 		cv = StratifiedKFold(n_splits=fold, shuffle=True, random_state=42)
+		y_preds[f"cv_preds_{j}"] = np.nan
 		cv_pred = []
 		for i, (train_idx, val_idx) in enumerate(cv.split(X_train_norm, y_train_binned)):
 			X_train_norm_cv, X_val_norm_cv = X_train_norm.iloc[train_idx], X_train_norm.iloc[val_idx]
 			y_train_cv, y_val_cv = y_train.iloc[train_idx], y_train.iloc[val_idx]
 			
-			best_mod.fit(X_train_norm_cv, y_train_cv)
-			preds = best_mod.predict(X_val_cv)
-			cv_pred.append(preds)
-			validation_loss.append(r2_score(y_val_cv, preds))
-
-		cv_pred = np.concatenate(cv_pred)
+			best_model.fit(X_train_norm_cv, y_train_cv)
+			preds = best_model.predict(X_val_norm_cv)
+			y_preds.loc[y_train.index[val_idx], f"cv_preds_{j}"] = preds
+			cv_pred.append(r2_score(y_val_cv, preds))
 		
 		# Performance statistics on validation set
-		roc_auc_val = roc_auc_score(y_train, cv_pred) # Not defined for Leave-One-Out
-		prec_val = precision_score_safe(y_train, cv_pred)  # Precision not defined and set to 0 error
-		reca_val = recall_score_safe(y_train, cv_pred)
-		f1_val = f1_score_safe(y_train, cv_pred)
-		mcc_val = matthews_corrcoef(y_train, cv_pred)
-		acc_val = accuracy_score(y_train, cv_pred)
-		print("Val ROC-AUC: %f" % (roc_auc_val))
-		print("Val Precision: %f" % (prec_val))
-		print("Val Recall: %f" % (reca_val))
-		print("Val F1: %f" % (f1_val))
-		print("Val MCC: %f" % (mcc_val))
-		print("Val Accuracy: %f" % (acc_val))
-		result_val = [roc_auc_val, prec_val, reca_val, f1_val, mcc_val, acc_val]
+		mse_val = mean_squared_error(y_train, y_preds.loc[y_train.index, f"cv_preds_{j}"])
+		rmse_val = np.sqrt(mean_squared_error(y_train, y_preds.loc[y_train.index, f"cv_preds_{j}"]))
+		evs_val = explained_variance_score(y_train, y_preds.loc[y_train.index, f"cv_preds_{j}"])
+		r2_val = r2_score(y_train, y_preds.loc[y_train.index, f"cv_preds_{j}"])
+		cor_val = np.corrcoef(np.array(y_train), y_preds.loc[y_train.index, f"cv_preds_{j}"])
+		print("Val MSE: %f" % (mse_val))
+		print("Val RMSE: %f" % (rmse_val))
+		print("Val EVS: %f" % (evs_val))
+		print("Val R-sq: %f" % (r2_val))
+		print("Val PCC: %f" % (cor_val[0, 1]))
+		result_val = [mse_val, rmse_val, evs_val, r2_val, cor_val[0, 1]]
 		results_cv.append(result_val)
 		
 		# Evaluate the model on the test set
-		X_test_norm = MinMaxScaler().fit_transform(X_test) # Normalize
+		X_test_norm = pd.DataFrame(MinMaxScaler().fit_transform(X_test),
+			columns=X_test.columns, index=X_test.index) # Normalize
 		best_model.fit(X_train_norm, y_train)
 		y_pred = best_model.predict(X_test_norm)
+		y_preds.loc[y_test.index, f"test_preds_{j}"] = y_pred
 		
 		# Performance on the test set
-		roc_auc_test = roc_auc_score(y_test, y_pred)
-		prec_test = precision_score_safe(y_test, y_pred)
-		reca_test = recall_score_safe(y_test, y_pred)
-		f1_test = f1_score_safe(y_test, y_pred)
-		mcc_test = matthews_corrcoef(y_test, y_pred)
-		acc_test = accuracy_score(y_test, y_pred)
-		print("Test ROC-AUC: %f" % (roc_auc_test))
-		print("Test Precision: %f" % (prec_test))
-		print("Test Recall: %f" % (reca_test))
-		print("Test F1: %f" % (f1_test))
-		print("Test MCC: %f" % (mcc_test))
-		print("Test Accuracy: %f" % (acc_test))
-		result_test = [roc_auc_test, prec_test, reca_test,
-			f1_test, mcc_test, acc_test]
+		mse = mean_squared_error(y_test, y_pred)
+		rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+		evs = explained_variance_score(y_test, y_pred)
+		r2 = r2_score(y_test, y_pred)
+		cor = np.corrcoef(np.array(y_test), y_pred)
+		print(cor, y_test, y_pred)
+		print("Test MSE: %f" % (mse))
+		print("Test RMSE: %f" % (rmse))
+		print("Test R-sq: %f" % (r2))
+		print("Test PCC: %f" % (cor[0, 1]))
+		result_test = [mse, rmse, evs, r2, cor[0, 1]]
 		results_test.append(result_test)
 		
 		# Save the fitted model to a file
@@ -375,9 +377,9 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 			index=best_model.feature_names_in_, name=f"rep_{j}")],
 			ignore_index=False, axis=1) 
 		
-		# Save predicted labels to file
-		preds[f"rep_{j}"] = pd.concat([pd.Series(cv_pred, index=X_train.index),
-			pd.Series(y_pred, index=X_test.index)], axis=0)
+		# # Save predicted labels to file
+		# preds[f"rep_{j}"] = pd.concat([pd.Series(cv_pred, index=X_train.index),
+		# 	pd.Series(y_pred, index=X_test.index)], axis=0)
 		
 		if plot=="t":
 			# Plot feature importances
@@ -392,7 +394,7 @@ def run_xgb(X_train, y_train, X_test, y_test, trait, fold, n, prefix, ht, plot):
 	feature_imp.to_csv(f"{args.save}/{prefix}_imp.csv")
 	
 	# Write predictions across reps to file
-	pd.DataFrame.from_dict(preds).to_csv(f"{args.save}/{prefix}_preds.csv")
+	y_preds.to_csv(f"{args.save}/{prefix}_preds.csv")
 	
 	return (results_cv, results_test)
 
@@ -402,42 +404,37 @@ def save_xgb_results(results_cv, results_test, args, tag, run_time, nsamp, nfeat
 	
 	results_cv = pd.DataFrame(
 		results_cv, 
-		columns=["ROC-AUC_val", "Precision_val", "Recall_val", "F1_val",
-		"MCC_val", "Accuracy_val"])
+		columns=["MSE_val", "RMSE_val", "EVS_val", "R2_val", "PCC_val"])
 	results_test = pd.DataFrame(
 		results_test, 
-		columns=["ROC-AUC_test", "Precision_test", "Recall_test", "F1_test",
-		"MCC_test", "Accuracy_test"])
+		columns=["MSE_test", "RMSE_test", "EVS_test", "R2_test", "PCC_test"])
 	
 	# Aggregate results and save to file
-	if not os.path.isfile(f"{args.save}/RESULTS_xgboost.txt"):
-		out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
+	if not os.path.isfile(f"{args.save}/RESULTS_xgboost.tsv"):
+		out = open(f"{args.save}/RESULTS_xgboost.tsv", "a")
 		out.write("Date\tRunTime\tTag\tY\tNumInstances\tNumFeatures")
-		out.write("\tCV_fold\tCV_rep\tROC-AUC_val\tROC-AUC_val_sd\tPrecision_val")
-		out.write("\tPrecision_val_sd\tRecall_val\tRecall_val_sd")
-		out.write("\tF1_val\tF1_val_sd\tMCC_val\tMCC_val_sd")
-		out.write("\tAccuracy_val\tAccuracy_val_sd\tROC-AUC_test\tROC-AUC_test_sd")
-		out.write("\tPrecision_test\tPrecision_test_sd\tRecall_test")
-		out.write("\tRecall_test_sd\tF1_test\tF1_test_sd\tMCC_test")
-		out.write("\tMCC_test_sd\tAccuracy_test\tAccuracy_test_sd")
+		out.write("\tCV_fold\tCV_rep\tMSE_val\tMSE_val_sd\tRMSE_val")
+		out.write("\tRMSE_val_sd\tEVS_val\tEVS_val_sd")
+		out.write("\tR2_val\tR2_val_sd\tPCC_val\tPCC_val_sd")
+		out.write("\tMSE_test\tMSE_test_sd\tRMSE_test\tRMSE_test_sd")
+		out.write("\tEVS_test\tEVS_test_sd\tR2_test\tR2_test_sd")
+		out.write("\tPCC_test\tPCC_test_sd")
 		out.close()
 	
-	out = open(f"{args.save}/RESULTS_xgboost.txt", "a")
+	out = open(f"{args.save}/RESULTS_xgboost.tsv", "a")
 	out.write(f'\n{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t')
 	out.write(f"{run_time}\t{tag}\t{args.y_name}\t{nsamp}\t")
 	out.write(f"{nfeats}\t{int(args.fold)}\t{int(args.n)}\t")
-	out.write(f'{np.mean(results_cv["ROC-AUC_val"])}\t{np.std(results_cv["ROC-AUC_val"])}\t')
-	out.write(f'{np.mean(results_cv["Precision_val"])}\t{np.std(results_cv["Precision_val"])}\t')
-	out.write(f'{np.mean(results_cv["Recall_val"])}\t{np.std(results_cv["Recall_val"])}\t')
-	out.write(f'{np.mean(results_cv["F1_val"])}\t{np.std(results_cv["F1_val"])}\t')
-	out.write(f'{np.mean(results_cv["MCC_val"])}\t{np.std(results_cv["MCC_val"])}\t')
-	out.write(f'{np.mean(results_cv["Accuracy_val"])}\t{np.std(results_cv["Accuracy_val"])}\t')
-	out.write(f'{np.mean(results_test["ROC-AUC_test"])}\t{np.std(results_test["ROC-AUC_test"])}\t')
-	out.write(f'{np.mean(results_test["Precision_test"])}\t{np.std(results_test["Precision_test"])}\t')
-	out.write(f'{np.mean(results_test["Recall_test"])}\t{np.std(results_test["Recall_test"])}\t')
-	out.write(f'{np.mean(results_test["F1_test"])}\t{np.std(results_test["F1_test"])}\t')
-	out.write(f'{np.mean(results_test["MCC_test"])}\t{np.std(results_test["MCC_test"])}\t')
-	out.write(f'{np.mean(results_test["Accuracy_test"])}\t{np.std(results_test["Accuracy_test"])}')
+	out.write(f"{np.mean(results_cv.MSE_val)}\t{np.std(results_cv.MSE_val)}\t")
+	out.write(f"{np.mean(results_cv.RMSE_val)}\t{np.std(results_cv.RMSE_val)}\t")
+	out.write(f"{np.mean(results_cv.EVS_val)}\t{np.std(results_cv.EVS_val)}\t")
+	out.write(f"{np.mean(results_cv.R2_val)}\t{np.std(results_cv.R2_val)}\t")
+	out.write(f"{np.mean(results_cv.PCC_val)}\t{np.std(results_cv.PCC_val)}\t")
+	out.write(f"{np.mean(results_test.MSE_test)}\t{np.std(results_test.MSE_test)}\t")
+	out.write(f"{np.mean(results_test.RMSE_test)}\t{np.std(results_test.RMSE_test)}\t")
+	out.write(f"{np.mean(results_test.EVS_test)}\t{np.std(results_test.EVS_test)}\t")
+	out.write(f"{np.mean(results_test.R2_test)}\t{np.std(results_test.R2_test)}\t")
+	out.write(f"{np.mean(results_test.PCC_test)}\t{np.std(results_test.PCC_test)}")
 	out.close()
 
 
@@ -483,7 +480,8 @@ if __name__ == "__main__":
 		y = X.loc[:, args.y_name]
 		X.drop(columns=args.y_name, inplace=True)
 	else:
-		Y = args.Y
+		Y = dt.fread(args.Y).to_pandas()
+		Y.set_index(Y.columns[0], inplace=True)
 		y = Y.loc[:, args.y_name]
 	
 	test = pd.read_csv(args.test, header=None) # test instances
@@ -499,6 +497,11 @@ if __name__ == "__main__":
 	if len(args.feat_list) > 0:
 		print("Using subset of features from list", args.feat_list[0])
 		X = X.loc[:,args.feat_list[0]]
+		print(f"New dimensions: {X.shape}")
+
+	if len(args.drop) > 0:
+		print("Dropping features", args.drop[0])
+		X.drop(columns=args.drop[0], inplace=True)
 		print(f"New dimensions: {X.shape}")
 	
 	# Train-test split
