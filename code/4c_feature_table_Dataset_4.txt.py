@@ -4,6 +4,8 @@ import os, json, joblib, warnings
 import datatable as dt
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from pprint import pprint
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import MinMaxScaler
@@ -34,6 +36,9 @@ dat4 = dt.fread("/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Data
 sum(dat4_features.index == dat4["pair_ID"]) # SANITY CHECK: 10300 matches
 dat4_features.insert(0, "Class", dat4['Class'].values) # Add the Class column to the features
 dat4_features.Class.value_counts()
+dat4_features.loc[dat4_features.Class == "test"].index.to_frame().\
+    to_csv("/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4_test_instances.txt",
+           index=False, header=False)
 
 # Determine what additional features are in dat4_features compared to dat4
 len(set(dat4_features.columns) - set(dat4.columns[1:])) # 5174 features in dat4_features and not in dat4
@@ -246,3 +251,81 @@ run_imputation(imputed_col_names, best_k_res, dat4_features)
 
 """ Calculate the correlation between features from the original Dataset_4.txt
 and the regenerated features in Imputed_Dataset_4_final_table.csv """
+
+og_dat4 = dt.fread("/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4.txt").to_pandas()
+new_dat4 = dt.fread("/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4_Features/Imputed_Dataset_4_final_table.csv").to_pandas()
+og_dat4.set_index("pair_ID", inplace=True)
+new_dat4.set_index("pair_ID", inplace=True)
+
+# Correlation between columns within a dataframe
+palette = sns.color_palette("pastel", 3)
+color_map = og_dat4.Class.map(dict(zip(og_dat4.Class.unique(), palette)))
+color_map2 = new_dat4.Class.map(dict(zip(new_dat4.Class.unique(), palette)))
+savedir = "/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/"
+
+sns.clustermap(og_dat4.drop(columns="Class").corr(), cmap="RdBu_r",
+			   cbar_kws={"label": "Correlation"}, method="average", center=0,
+			   xticklabels=False, yticklabels=False)
+plt.tight_layout() ; plt.savefig(savedir + "Corr_features_Dataset_4.png") ; plt.close()
+
+sns.heatmap(new_dat4.drop(columns="Class").corr(), cmap="RdBu_r",
+			   cbar_kws={"label": "Correlation"}, center=0,
+			   xticklabels=False, yticklabels=False)
+plt.tight_layout() ; plt.savefig(savedir + "Dataset_4_Features/Corr_features_imputed_Dataset_4.png") ; plt.close()
+
+sns.heatmap(og_dat4.drop(columns="Class").T.corr(), cmap="RdBu_r",
+			   cbar_kws={"label": "Correlation"}, center=0,
+			   xticklabels=False, yticklabels=False)
+plt.tight_layout() ; plt.savefig(savedir + "Corr_instances_Dataset_4.png") ; plt.close()
+
+sns.heatmap(og_dat4.drop(columns="Class").T.corr(), cmap="RdBu_r",
+			   cbar_kws={"label": "Correlation"}, center=0,
+			   xticklabels=False, yticklabels=False)
+plt.tight_layout() ; plt.savefig(savedir + "Dataset_4_Features/Corr_instances_imputed_Dataset_4.png") ; plt.close()
+
+# Correlations between the original and imputed features
+feat_corrs = {}
+for feat in og_dat4.columns[1:]:
+	if feat in new_dat4.columns:
+		feat_corrs[feat] = og_dat4[feat].corr(new_dat4.loc[og_dat4.index, feat]) # Calculate the correlation
+
+
+pd.DataFrame.from_dict(feat_corrs, orient="index", columns=["Correlation"]).\
+    plot.hist(bins=30, edgecolor='black', alpha=0.7)
+plt.title("Correlation between original and imputed features")
+plt.savefig(savedir + "Dataset_4_Features/Corr_features_histogram_imputed.png")
+# conclusion: common features are different... but the imputation will have an effect.
+
+pd.DataFrame.from_dict(feat_corrs, orient="index", columns=["Correlation"]).\
+    to_csv(savedir + "Dataset_4_Features/Corr_features_histogram_imputed.csv")
+
+# Correlation between the original and re-generated, but not imputed, features
+files = [f for f in os.listdir(savedir + "Dataset_4_Features/") if f.startswith("Dataset_4")]
+df_list = []
+for f in files:
+	tmp = dt.fread(savedir + "Dataset_4_Features/" + f).to_pandas()
+	tmp['pair_ID'] = tmp['gene1'] + '_' + tmp['gene2']
+	tmp.set_index('pair_ID', inplace=True)
+	tmp.drop(columns=['gene1', 'gene2'], inplace=True)
+	df_list.append(tmp)
+
+new_dat4_not_imputed = pd.concat(df_list, axis=1, ignore_index=False)
+
+feat_corrs = {}
+for feat in og_dat4.columns[1:]:
+	if feat in new_dat4_not_imputed.columns:
+		try:
+			feat_corrs[feat] = og_dat4[feat].corr(new_dat4_not_imputed.loc[og_dat4.index, feat].iloc[:,0]) # Calculate the correlation
+		except:
+			feat_corrs[feat] = og_dat4[feat].corr(new_dat4_not_imputed.loc[og_dat4.index, feat]) # Calculate the correlation
+
+pd.DataFrame.from_dict(feat_corrs, orient="index", columns=["Correlation"]).\
+    plot.hist(bins=30, edgecolor='black', alpha=0.7)
+plt.title("Correlation between original and re-generated features (not imputed yet)")
+plt.savefig(savedir + "Dataset_4_Features/Corr_features_histogram_not_imputed.png")
+plt.close()
+# conclusion: most have a PCC=1, but there are are several that don't. Will need
+# to see the csv file to see which ones are not correlated.
+
+pd.DataFrame.from_dict(feat_corrs, orient="index", columns=["Correlation"]).\
+    to_csv(savedir + "Dataset_4_Features/Corr_features_histogram_not_imputed.csv")
