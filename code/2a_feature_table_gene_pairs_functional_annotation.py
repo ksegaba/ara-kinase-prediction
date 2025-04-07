@@ -66,7 +66,8 @@ print("Script started")
 # directory = '/home/tangji19/02_Other_Project/01_Kenia/01_feature_generating/AraCyc_pathways/AraCyc'
 directory = '/home/seguraab/ara-kinase-prediction/'
 json_dir = 'data/2021_cusack_data/21_arabidopsis_redundancy/01_functional_annotation/AraCyc_pathways/AraCyc'
-save_dir = 'data/2021_cusack_data/Dataset_4_Features'
+# save_dir = 'data/2021_cusack_data/Dataset_4_Features'
+save_dir = 'data/Kinase_genes/features'
 
 # Ensure the save directory exists
 if not os.path.exists(os.path.join(directory, save_dir)):
@@ -89,18 +90,23 @@ json_files = [f for f in os.listdir(os.path.join(directory, json_dir)) if f.ends
 # print(len(gene_pairs)) 
 
 # Input selected instance txt file
-# instance_file = 'instances_dataset_1.txt'
-instance_file = 'data/2021_cusack_data/Dataset_4.txt'
+# instance_file = 'instances_dataset_1.txt' # Melissa's gene pairs combined with Dataset_4.txt "test" instances.
+# instance_file = 'data/2021_cusack_data/Dataset_4.txt' # Cusack 2021 Dataset_4.txt as-is
+instance_file = 'data/Kinase_genes/instances_tair10_kinases.txt'
 file_path = os.path.join(directory, instance_file)
-data = pd.read_csv(file_path, sep='\t')
-data = data["pair_ID"].str.split("_", expand=True)
+result_df = pd.read_csv(file_path, sep='\t')
+
+# data = pd.read_csv(file_path, sep='\t')
+# data = data["pair_ID"].str.split("_", expand=True)
 
 # Create a list of tuples from the DataFrame
-gene_pairs = list(data.itertuples(index=False, name=None))
+# gene_pairs = list(data.itertuples(index=False, name=None))
+gene_pairs = list(result_df.itertuples(index=False, name=None))
 print(len(gene_pairs))
 
 # Dataframe to store the results
-result_df = pd.DataFrame(gene_pairs, columns=['gene1', 'gene2'])
+# result_df = pd.DataFrame(gene_pairs, columns=['gene1', 'gene2'])
+print(result_df.shape)
 actions = ["log","noTF","reciprocal","squared"]
 
 # Process each JSON file and generate the respective column in the dataframe
@@ -128,4 +134,5 @@ for index, file  in enumerate(json_files):
     #     result_df = pd.DataFrame(gene_pairs, columns=['gene1', 'gene2'])
 # Save the result to a text file
 # result_df.to_csv('/home/tangji19/02_Other_Project/01_Kenia/01_feature_generating/AraCyc_pathways/gene_pairs.txt', sep='\t', index=False, na_rep='NaN')
-result_df.to_csv(os.path.join(directory, save_dir, 'Dataset_4_features_functional_annotations.txt'), sep='\t', index=False, na_rep='NaN')
+# result_df.to_csv(os.path.join(directory, save_dir, 'Dataset_4_features_functional_annotations.txt'), sep='\t', index=False, na_rep='NaN')
+result_df.to_csv(os.path.join(directory, save_dir, 'TAIR10_kinases_features_functional_annotations.txt'), sep='\t', index=False, na_rep='NaN')
