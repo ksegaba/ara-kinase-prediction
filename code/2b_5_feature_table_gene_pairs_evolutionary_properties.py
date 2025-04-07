@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 '''Create the evolutionary properties feature table for single genes as instances.'''
 
-import os, swifter
+import os, swifter, concurrent
 import numpy as np
 import pandas as pd
 import datatable as dt
@@ -71,7 +71,7 @@ def calc_binary_adj_feat_values(adj, col_name):
 def apply_transformations(values, method):
 	''' Apply transformations to a dataframe of continuous feature values.
 	
-	Parameters:
+	Args:
 		- df (pd.DataFrame): A data frame of feature values
 		- chklst_df (pd.DataFrame): Feature engineering checklist
 	
@@ -106,42 +106,69 @@ def apply_transformations(values, method):
 		return new_values
 
 
-def calc_continuous_feat_values(gene1, gene2, gene_values, calc_type):
-	value1 = gene_values.T.get(gene1, np.nan)
-	value2 = gene_values.T.get(gene2, np.nan)
+def calc_feature_values(gene1_values, gene2_values, genes, gene_values, calc_type):
+	"""Calculate feature values for a gene pair.
+	Args:
+		gene1_values (nested dictionary): genes as outermost keys, column names in gene_values as innermost keys
+		gene2_values (nested dictionary): genes as outermost keys, column names in gene_values as innermost keys
+		genes (pandas.DataFrame): dataframe with two columns ("gene1" and "gene2") of gene IDs. Rows represent a gene pair.
+		gene_values (pandas.DataFrame): feature values from which feature values will be calculated from for a gene pair
+		calc_type (str): the type of calculation to generate the feature values
+	Returns:
+		nested dictionary: gene pair tuples as outermost keys, column names in gene_values as innermost keys
+	"""
 	
-	# take the median across splice variants of the gene
-	if type(value1) != np.float64: 
-		value1 = gene_values.T.filter(like=gene1).median(axis=1)
-		value1.name = gene1
-	if type(value2) != np.float64:
-		value2 = gene_values.T.filter(like=gene2).median(axis=1)
-		value2.name = gene2
+	continuous_values = {}
+	for col in gene_values.columns:
+		new_col = col + '_' + calc_type.lower().replace(' ', '_')
 		
-	if calc_type in ['Number in pair', 'Pair total']:
-		return value1 + value2
-	elif calc_type == 'Average':
-		return (value1 + value2) / 2
-	elif calc_type == 'Difference':
-		return abs(value1 - value2)
-	elif calc_type == 'Maximum':
-		try:
-			return max(value1, value2)
-		except ValueError: # if value1 and value2 are pandas Series
-			return np.maximum(value1, value2)
-	elif calc_type == 'Minimum':
-		try:
-			return min(value1, value2)
-		except ValueError:
-			return np.minimum(value1, value2)
-	elif calc_type == '% similarity':
-		return None
+		for pair in tqdm(genes.iterrows(), total=len(genes), desc=f"Processing gene pairs for {new_col}"):
+			try:
+				value1 = gene1_values[pair[1].gene1][col]
+				value2 = gene2_values[pair[1].gene2][col]
+			except KeyError: # one or both of the genes have no feature data
+				continuous_values[(pair[1].gene1, pair[1].gene2)] = {}
+				continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = None
+				continue
+			
+			# # take the median across splice variants of the gene
+			# if type(value1) != np.float64: 
+			# 	value1 = gene_values.T.filter(like=key).median(axis=1)
+			# 	value1.name = key
+			# if type(value2) != np.float64:
+			# 	value2 = gene_values.T.filter(like=key2).median(axis=1)
+			# 	value2.name = key2
+			
+			# calculate the continuous value for a gene pair
+			if (pair[1].gene1, pair[1].gene2) not in continuous_values:
+				continuous_values[(pair[1].gene1, pair[1].gene2)] = {}
+			
+			if calc_type in ['Number in pair', 'Pair total']:
+				continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = value1 + value2
+			elif calc_type == 'Average':
+				continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = (value1 + value2) / 2
+			elif calc_type == 'Difference':
+				continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = abs(value1 - value2)
+			elif calc_type == 'Maximum':
+				try:
+					continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = max(value1, value2)
+				except ValueError: # if value1 and value2 are pandas Series
+					continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = np.maximum(value1, value2)
+			elif calc_type == 'Minimum':
+				try:
+					continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = min(value1, value2)
+				except ValueError:
+					continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = np.minimum(value1, value2)
+			elif calc_type == '% similarity':
+				continuous_values[(pair[1].gene1, pair[1].gene2)][new_col] = None
+	
+	return continuous_values
 
 
 def apply_transformations_df(df):
 	''' Apply transformations to a dataframe of continuous feature values.
 	
-	Parameters:
+	Args:
 		- df (pd.DataFrame): A data frame of feature values
 	
 	Returns an expanded dataframe with additional transformations on continuous columns:
@@ -151,54 +178,57 @@ def apply_transformations_df(df):
 		- Squared
 	'''
 	df_list = []
+	df_reset = df.reset_index()
 	
 	# Apply the transformations to individual columns
 	for column in df.columns:
-		# Bin the feature value
-		bins = pd.qcut(df[column], q=4, labels=False, duplicates='drop')
-		bins.name = column + '_binned'
-		
-		# Calculate the log
-		log_vals = df[column].swifter.apply(lambda x: np.log10(x) if x > 0 else np.nan)
-		log_vals.name = column + '_log'
-		
-		# Calculate the reciprocal
-		reciprocal = df[column].swifter.apply(lambda x: 1/x if x != 0 else np.nan)
-		reciprocal.name = column + '_reciprocal'
-		
-		# Calculate the square
-		square = df[column] ** 2
-		square.name = column + '_squared'
-		
-		df_list.append(pd.concat([df[column], bins, log_vals, reciprocal,
-									square], axis=1, ignore_index=False))
+		if column not in df.index.names:
+			# Bin the feature value
+			bins = pd.qcut(df_reset[column], q=4, labels=False, duplicates='drop')
+			bins.name = column + '_binned'
+			
+			# Calculate the log
+			log_vals = df_reset[column].swifter.apply(lambda x: np.log10(x) if x > 0 else np.nan)
+			log_vals.name = column + '_log'
+			
+			# Calculate the reciprocal
+			reciprocal = df_reset[column].swifter.apply(lambda x: 1/x if x != 0 else np.nan)
+			reciprocal.name = column + '_reciprocal'
+			
+			# Calculate the square
+			square = df_reset[column] ** 2
+			square.name = column + '_squared'
+			
+			df_list.append(pd.concat([df_reset[column], bins, log_vals,
+				reciprocal, square], axis=1, ignore_index=False))
 			
 	return pd.concat(df_list, axis=1, ignore_index=False)
 
 
-def calc_paml_feat_values(cols):
+def calc_paml_feat_values(col_list):
 	'''Create the paml feature table for gene pairs in the `genes` file.'''
 	
-	cols = [col for col in paml_feat.loc[:, cols].columns \
+	cols = [col for col in paml_feat.loc[:, col_list].columns \
 			if not ('_binned' in col or '_log' in col \
-			or '_reciprocal' in col or '_squared' in col)]
+			or '_reciprocal' in col or '_squared' in col)] # columns to calculate feature values for
+	
+	feature_values = paml_feat[cols].T.to_dict() # genes as keys
+	gene1_values = {gene: feature_values[gene] for gene in genes.gene1.values if gene in feature_values}
+	gene2_values = {gene: feature_values[gene] for gene in genes.gene2.values if gene in feature_values}
 	
 	cols_features = []
 	for calc_type in ['Average', 'Difference', 'Maximum', 'Minimum', 'Pair total']:
 		print('Applying the calculation:', calc_type)
-		cols_values = genes.swifter.apply(
-			lambda x: calc_continuous_feat_values(
-				x['gene1'], x['gene2'], paml_feat[cols], calc_type), # type: ignore
-			axis=1)
-		cols_values.columns = cols_values.columns + '_' + calc_type.lower().replace(' ', '_')
-		cols_values.insert(0, 'gene1', genes.gene1)
-		cols_values.insert(1, 'gene2', genes.gene2)
-		cols_values.set_index(['gene1', 'gene2'], inplace=True)
-		cols_features.append(cols_values)
+		
+		cols_values = calc_feature_values(gene1_values, gene2_values,
+			genes, paml_feat[cols], calc_type) # calculate the feature values
+		
+		cols_features.append(pd.DataFrame.from_dict(cols_values, orient="index"))
 		del cols_values
 	
-	# Combine into a single dataframe
+	# Combine features into a single dataframe
 	cols_features = pd.concat(cols_features, axis=1, ignore_index=False)
+	cols_features.index = pd.MultiIndex.from_tuples(list(cols_features.index), names=["gene1", "gene2"])
 	
 	# Apply transformations
 	cols_features = apply_transformations_df(cols_features)
@@ -216,14 +246,27 @@ if __name__ == '__main__':
 	feat1 = pd.read_csv('data/Features/evolutionary_properties_single_genes_feature_table_part1.csv', index_col=0)
 	paml_feat = dt.fread('data/Features/evolutionary_properties_single_genes_feature_table_part2_paml_only.csv').to_pandas()
 	blast_hits = dt.fread('data/Features/evolutionary_properties_single_genes_reciprocal_best_match_adjacency_matrix.csv.gz').to_pandas()
-	paml_feat.set_index('C0', inplace=True)
 	blast_hits.set_index('gene', inplace=True)
-
+	blast_hits = blast_hits.astype(int) # convert boolean to binary
+	
+	# Calculate the median dN, dS, and dN/dS values across splice variants of a gene
+	paml_feat["gene"] = paml_feat["C0"].str.split('.').str[0] # get gene ID from mRNA ID
+	paml_feat = paml_feat.drop(columns="C0").groupby("gene").median()
+	
+	# If any of the splice variants for two genes were reciprocal blast hits, set their value to 1
+	sum(blast_hits.columns==blast_hits.index) # row and col gene names are the same
+	row_groups = blast_hits.index.str.split('.').str[0]
+	col_groups = blast_hits.columns.str.split('.').str[0]
+	blast_hits_grouped = (blast_hits.groupby(row_groups, axis=0).any().\
+		groupby(col_groups, axis=1).any()).astype(int)
+	blast_dict = blast_hits_grouped.to_dict()
+ 
 	# Instances file
 	# genes = pd.read_csv('data/instances_dataset_1.txt', sep='\t')
-	genes = pd.read_csv('data/2021_cusack_data/Dataset_4.txt', sep='\t')
-	genes = genes["pair_ID"].str.split("_", expand=True)
-	genes.columns = ['gene1', 'gene2']
+	# genes = pd.read_csv('data/2021_cusack_data/Dataset_4.txt', sep='\t')
+	genes = pd.read_csv('data/Kinase_genes/instances_tair10_kinases.txt', sep='\t')
+	# genes = genes["pair_ID"].str.split("_", expand=True)
+	# genes.columns = ['gene1', 'gene2']
 	
 	###################### Calculate the features values #######################
 	features = {}
@@ -236,63 +279,59 @@ if __name__ == '__main__':
 	features['Ks'] = calc_paml_feat_values(ks_cols)
 	features['Ka'] = calc_paml_feat_values(ka_cols)
 
-	print("Make the reciprocal best match feature...")
-	features['Reciprocal best match'] = calc_binary_adj_feat_values(blast_hits, "binary_reciprocal_best_match")
-	features['Reciprocal best match'].set_index(['gene1', 'gene2'], inplace=True)
+	# print("Make the reciprocal best match feature...")
+	# features['Reciprocal best match'] = calc_binary_adj_feat_values(blast_hits_grouped, "binary_reciprocal_best_match")
+	# features['Reciprocal best match'].set_index(['gene1', 'gene2'], inplace=True)
 
 	# Make the rest of the features
-	for idx, row in tqdm(checklist.iterrows()):
-		ml_feat_name = row['ML model feature name']
+	feature_values = feat1.T.to_dict() # genes as keys
+	gene1_values = {gene: feature_values[gene] for gene in genes.gene1.values if gene in feature_values}
+	gene2_values = {gene: feature_values[gene] for gene in genes.gene2.values if gene in feature_values}
+
+	ml_features = checklist.groupby(
+		['NEW Feature name', 'Calculation for gene pair', 'Data processing method'])\
+		['ML model feature name'].apply(list).reset_index()
+	
+	for idx, row in tqdm(ml_features.iterrows()):
+		ml_feat_names = row['ML model feature name']
 		feat_name = row['NEW Feature name']
 		calc_type = row['Calculation for gene pair']
 		feat_type = row['Data processing method']
+		print(f'Generating features for {feat_name}')
 		
 		if feat_name in ['0 blast res', 'tbd', 'arabidopsis paml combined results']:
 			continue
 		
 		elif feat_name in ['gene family size', 'retention rate']:
-			print(f'Generating feature: {ml_feat_name}')
 			target_col = '_'.join([feat_type.lower(), feat_name.replace(' ', '_')])
-			values = genes.swifter.apply(
-				lambda x: calc_continuous_feat_values(
-					x['gene1'], x['gene2'], feat1[target_col], calc_type), # type: ignore
-				axis=1)
-			values.name = ml_feat_name
-			values = apply_transformations(values, feat_type)
-			values = pd.concat([genes[['gene1', 'gene2']], values], axis=1)
-			values.set_index(['gene1', 'gene2'], inplace=True)
-			features[ml_feat_name] = values
-		
+			values = calc_feature_values(gene1_values, gene2_values,
+				genes, pd.DataFrame(feat1[target_col]), calc_type)
+			
 		elif (feat_name == 'lethality') & (feat_type == 'Continuous'):
-			print(f'Generating feature: {ml_feat_name}')
-			values = genes.swifter.apply(
-				lambda x: calc_continuous_feat_values(
-					x['gene1'], x['gene2'], feat1['continuous_lethality_score'], calc_type), # type: ignore
-				axis=1)
-			values.name = ml_feat_name
-			values = apply_transformations(values, feat_type)
-			values = pd.concat([genes[['gene1', 'gene2']], values], axis=1)
-			values.set_index(['gene1', 'gene2'], inplace=True)
-			features[ml_feat_name] = values
-		
+			values = calc_feature_values(gene1_values, gene2_values,
+				genes, pd.DataFrame(feat1['continuous_lethality_score']), calc_type)
+			
 		elif (feat_name == 'lethality') & (feat_type == 'Binary'):
-			print(f'Generating feature: {ml_feat_name}')
-			values = genes.swifter.apply(
-				lambda x: calc_continuous_feat_values(\
-					x['gene1'], x['gene2'], feat1['binary_lethality'], calc_type), # type: ignore
-				axis=1)
-			values.name = ml_feat_name
-			values = apply_transformations(values, feat_type)
-			values = pd.concat([genes[['gene1', 'gene2']], values], axis=1)
-			values.set_index(['gene1', 'gene2'], inplace=True)
-			features[ml_feat_name] = values
+			values = calc_feature_values(gene1_values, gene2_values,
+				genes, pd.DataFrame(feat1['binary_lethality']), calc_type)
+			
+		values = pd.DataFrame.from_dict(values, orient="index") #type: ignore
+		values = pd.concat([values] * len(ml_feat_names), axis=1)
+		values.columns = ml_feat_names
+		values.index = pd.MultiIndex.from_tuples(list(values.index), names=["gene1", "gene2"]) #type: ignore
+		values = apply_transformations_df(values)
+		features[f"{feat_name}_{calc_type}"] = values
+		del values
 	
 	# Save the feature table to a file!
 	# pd.concat(features.values(), axis=1, ignore_index=False).to_csv(
 	# 	'data/Features/evolutionary_properties_gene_pairs_features.txt', sep='\t')
+	# pd.concat(features.values(), axis=1, ignore_index=False).to_csv(
+	# 	'data/2021_cusack_data/Dataset_4_Features/Dataset_4_features_evolutionary_properties.txt',
+	# 	sep='\t')
 	pd.concat(features.values(), axis=1, ignore_index=False).to_csv(
-		'data/2021_cusack_data/Dataset_4_Features/Dataset_4_features_evolutionary_properties.txt',
-		sep='\t')
+		'data/Kinase_genes/features/TAIR10_kinases_features_evolutionary_properties.txt',
+		sep='\t', chunksize=100)
 	
 	############### Update the evolutionary properties checklist ###############
 	
