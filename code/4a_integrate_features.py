@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 '''Combine feature tables from the different data categories and save as a 
 single file'''
-# CONVERT THIS FILE TO IPYNB
 
-import os
+import os, re, json
 import datatable as dt
 import pandas as pd
 import numpy as np
@@ -220,3 +219,27 @@ for i in range(10):
     plt.close()
     
     del combined, combined_corr, train_files, test_files, df_train, df_test
+    
+#### Generate the regression label for 20240725_melissa_ara_data ####
+# Total seed count epistasis values
+epistasis = pd.read_csv("../20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_TSC_emmeans_epistasis.tsv",
+    sep="\t", header=[0,1,2])
+
+new_cols = ['.'.join(col) for col in epistasis.columns]
+new_cols = [re.sub(r"\.Unnamed: \d+_level_\d+", "", col) for col in new_cols]
+new_cols = [re.sub(r"Unnamed: \d+_level_\d+\.", "", col) for col in new_cols]
+epistasis.columns = new_cols
+
+# Get instances from 20240725_melissa_ara_data
+instances = pd.read_csv("../20240725_melissa_ara_data/interactions_fitness.txt", sep="\t")
+instances.MA = instances.MA.str.upper()
+instances.MB = instances.MB.str.upper()
+instances.index = np.sort(instances[['MA', 'MB']], axis=1) # sort the gene pairs
+instances.index = instances.index.map(tuple) # convert to tuples
+instances.index = instances.index.map(lambda x: x[0] + '_' + x[1]) # convert to 
+
+# Subset the epistasis data
+epistasis = epistasis.loc[epistasis.Set.isin(instances.Set.values)]
+epistasis.index = epistasis.apply(lambda x: instances.loc[instances.Set==int(x["Set"])].index[0], axis=1)
+epistasis.to_csv("../20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_TSC_emmeans_epistasis_regression_labels.csv", index=True)
+
