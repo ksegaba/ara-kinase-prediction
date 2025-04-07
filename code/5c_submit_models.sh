@@ -29,8 +29,20 @@ python code/5a_classification.py \
 	-tag debug_xgb_clf_with_cusack_2021 \
 	-ht kfold -fold 5 -n 10 -feat all -plot f
 
-## RandomForest
+## RandomForest (these were submitted in HPCC)
+python /home/seguraab/external_software/ML-Pipeline/ML_classification.py \
+	-df data/2021_cusack_data/Dataset_4_Features/Imputed_Dataset_4_final_table.csv \
+	-y_name Class -pos positive -apply test -cl_train positive,negative \
+	-alg RF -n_jobs 14 -b 100 -cv_num 5 -x_norm t -gs_reps 10 -cm t \
+	-save rf_clf_imputed_Dataset_4 -tag debug_xgb_clf_with_cusack_2021_imputed \
+	-plots f
 
+python /home/seguraab/external_software/ML-Pipeline/ML_classification.py \
+	-df data/2021_cusack_data/Dataset_4.txt \
+	-y_name Class -pos positive -apply test -cl_train positive,negative \
+	-alg RF -n_jobs 14 -b 100 -cv_num 5 -x_norm t -gs_reps 10 -cm t \
+	-save rf_clf_og_Dataset_4 -tag debug_xgb_clf_with_cusack_2021 \
+	-plots f
 
 # :'''Preliminary classification models with the 603 features that contained no ############################# re-run these, 9/18/2024 (bc I added normalization)
 # missing data. Hyperparameter tuning was implemented with two methods:
