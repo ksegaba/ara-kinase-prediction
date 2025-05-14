@@ -65,14 +65,14 @@ def generate_feature_sets(shap_values, output_dir):
             #
             # Select features above the threshold
             feature_sets[round(percentile, 1)] = mean_abs_shap[
-                mean_abs_shap >= threshold].index.tolist()
+                mean_abs_shap >= threshold].index
             #
             # Save the feature set to a file
             feature_set_path = os.path.join(
                 output_dir, f'feature_set_above_p{round(percentile, 1)}.txt')
-            with open(feature_set_path, 'w') as f:
-                f.write('\n'.join(feature_sets[round(percentile, 1)]))
-    #
+            pd.DataFrame(feature_sets[round(percentile, 1)]).to_csv(
+                feature_set_path, index=False, header=False)
+            #
     return feature_sets
 
 
@@ -98,7 +98,7 @@ def generate_sbatch_file(output_dir, data_path, sbatch_name, tag, feature_sets):
             f"FEATURE_SETS=($(ls feature_set_above_p*.txt))\n\n")
         f.write(
             "python /mnt/home/seguraab/Shiu_Lab/ML-Pipeline/ML_classification.py \\\n")
-        f.write(f"\t-df {data_path} \\\n")
+        f.write(f"\t-df {data_path} -sep ,\\\n")
         f.write("\t-y_name Class -pos positive -cl_train positive,negative \\\n")
         f.write("\t-feat ${FEATURE_SETS[${SLURM_ARRAY_TASK_ID}]} \\\n")
         f.write(
@@ -135,11 +135,11 @@ if __name__ == "__main__":
     tag = args.tag
 
     # Arguments for example usage
-    model_path = "/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4_Features/output_clf/RF/rf_clf_imputed_Dataset_4by_bin_cat_cont_type_models.pkl"
-    data_path = "/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4_Features/Imputed_Dataset_4_X_train_final_table_by_bin_cat_cont_type.csv"
-    output_dir = "/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4_Features/output_clf/RF_FS"
-    sbatch_name = "run_rf_feature_selection_models.sb"
-    tag = "rf_fs_clf_imputed_Dataset_4by_bin_cat_cont_type"
+    # model_path = "/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4_Features/output_clf/RF/rf_clf_imputed_Dataset_4by_bin_cat_cont_type_models.pkl"
+    # data_path = "/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4_Features/Imputed_Dataset_4_X_train_final_table_by_bin_cat_cont_type.csv"
+    # output_dir = "/home/seguraab/ara-kinase-prediction/data/2021_cusack_data/Dataset_4_Features/output_clf/RF_FS"
+    # sbatch_name = "run_rf_feature_selection_models.sb"
+    # tag = "rf_fs_clf_imputed_Dataset_4by_bin_cat_cont_type"
 
     # Load data and model
     data = dt.fread(data_path).to_pandas()
