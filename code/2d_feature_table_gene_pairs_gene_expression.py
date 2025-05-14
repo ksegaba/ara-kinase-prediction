@@ -73,7 +73,7 @@ def apply_transformations(df, feature_name):
     Apply transformations based on the feature name suffix.
 
     Parameters:
-    - df (pd.DataFrame): DataFrame containing the calculated feature values.
+    - df (dict): dictionary containing the calculated feature values.
     - feature_name (str): The feature name indicating which transformations to apply.
 
     Returns:
@@ -93,7 +93,8 @@ def apply_transformations(df, feature_name):
         return df[feature_name]
     
     
-# Process each file path and update the gene_pairs DataFrame
+# Process each file path and update the gene_pairs dictionary
+gene_pairs_dict = {}
 for index, row in tqdm(feature_data.iterrows()):
     file_path = row['File path']
     feature_name = row['ML model feature name']
@@ -111,16 +112,19 @@ for index, row in tqdm(feature_data.iterrows()):
             gene_values = gene_values['ribo']
             
         # gene pair value
-        gene_pairs[feature_name] = gene_pairs.apply(
+        gene_pairs_dict[feature_name] = gene_pairs.apply(
                 lambda row: calculate_feature_value(row['gene1'], row['gene2'], gene_values, operation), axis=1
             )
         
         # Apply transformations based on the feature name suffix
-        gene_pairs[feature_name] = apply_transformations(gene_pairs, feature_name)
+        gene_pairs_dict[feature_name] = apply_transformations(gene_pairs_dict, feature_name)
             
     else:
         print('Path not found for the file :', file_path)
 
+# Creating a DataFrame from the dictionary
+gene_pairs_dict = pd.DataFrame(gene_pairs_dict)
+gene_pairs = pd.concat([gene_pairs, gene_pairs_dict], axis=1)
 
 # Saving the feature matrix/table
 # gene_pairs.to_csv("/home/seguraab/ara-kinase-prediction/data/Features/04_gene_expression_gene_pair_features.csv", index = False)

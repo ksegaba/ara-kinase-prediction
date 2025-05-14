@@ -279,7 +279,7 @@ if (aranet_features.gene1.equals(co_expr_features.gene1)) &\
     print("Saving the feature table to data/Features/network_properties_gene_pairs_features.csv")
     # feat_table.to_csv('data/Features/network_properties_gene_pairs_features.csv', index=False)
     # feat_table.to_csv('data/2021_cusack_data/Dataset_4_Features/Dataset_4_features_network_properties.txt', sep='\t', index=False)
-    feat_table.to_csv('data/Kinase_genes/features/TAIR10_features_network_properties.txt', sep='\t', index=False)
+    feat_table.to_csv('data/Kinase_genes/features/TAIR10_kinases_features_network_properties.txt', sep='\t', index=False)
     
     print("Feature table dimensions:", feat_table.shape)
     print("Checklist file dimensions:", checklist.shape)
