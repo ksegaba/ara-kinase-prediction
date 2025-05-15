@@ -330,7 +330,7 @@ continuous_imputer = joblib.load(
 rf_mod = joblib.load(
     "data/2021_cusack_data/Dataset_4_Features/output_clf/RF/rf_clf_imputed_Dataset_4by_bin_cat_cont_type_models.pkl")
 rf_fs_mod = joblib.load(
-    "data/2021_cusack_data/Dataset_4_Features/output_clf/RF_FS/rf_fs_clf_imputed_Dataset_4by_bin_cat_cont_type_feature_set_above_p0.7.txt_models.pkl")
+    "data/2021_cusack_data/Dataset_4_Features/output_clf/RF_FS/rf_fs_clf_imputed_Dataset_4by_bin_cat_cont_type_feature_set_above_p0.9.txt_models.pkl")
 y_preds = {"Class": {"RF_before_FS": [], "RF_FS": []}, "Probability": {
     "RF_before_FS": [], "RF_FS": []}}  # predicted labels
 
@@ -417,6 +417,26 @@ with open("data/Kinase_genes/features/Imputed_TAIR10_kinases_final_table_by_bin_
         del chunk_y_pred_proba_fs
         gc.collect()
         chunk_idx += 1
+
+# I added this code later since I had not put in the rf_fs_mod lines yet.
+# I didn't want to hastle with re-running integration or trying to skip lines.
+# chunk_iter = pd.read_csv(
+#     'data/Kinase_genes/features/Imputed_TAIR10_kinases_final_table_by_bin_cat_cont_type.csv', chunksize=50000)
+# gene_pairs_kept = []
+# for i, chunk in enumerate(chunk_iter):
+#     print(i)
+#     gene_pairs_kept.extend(chunk[['gene1', 'gene2']].values.tolist())
+#     chunk_y_pred = rf_mod.predict(chunk.loc[:, rf_mod.feature_names_in_])
+#     chunk_y_pred_proba = rf_mod.predict_proba(
+#         chunk.loc[:, rf_mod.feature_names_in_])
+#     chunk_y_pred_fs = rf_fs_mod.predict(
+#         chunk.loc[:, rf_fs_mod.feature_names_in_])
+#     chunk_y_pred_proba_fs = rf_fs_mod.predict_proba(
+#         chunk.loc[:, rf_fs_mod.feature_names_in_])
+#     y_preds["Class"]["RF_before_FS"].extend(chunk_y_pred)
+#     y_preds["Probability"]["RF_before_FS"].extend(chunk_y_pred_proba[:, 1])
+#     y_preds["Class"]["RF_FS"].extend(chunk_y_pred_fs)
+#     y_preds["Probability"]["RF_FS"].extend(chunk_y_pred_proba_fs[:, 1])
 
 # Save the predicted labels to a file
 y_preds_flat = {f'{outer}_{inner}': value for outer,
