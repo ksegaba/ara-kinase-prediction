@@ -33,11 +33,12 @@ dependencies:
   - bzip2=1.0.8=h5eee18b_6
   - c-ares=1.19.1=h5eee18b_0
   - c-blosc2=2.12.0=h80c7b02_0
-  - ca-certificates=2024.8.30=hbcca054_0
+  - ca-certificates=2025.4.26=hbd8a1cb_0
   - click=8.1.7=py310h06a4308_0
   - cloudpickle=3.0.0=py310h06a4308_0
   - comm=0.2.2=pyhd8ed1ab_0
   - contourpy=1.2.0=py310hdb19cb5_0
+  - cudatoolkit=11.8.0=h4ba93d1_13
   - cycler=0.11.0=pyhd3eb1b0_0
   - cyrus-sasl=2.1.28=h52b45da_1
   - cytoolz=0.12.2=py310h5eee18b_0
@@ -77,6 +78,7 @@ dependencies:
   - jpeg=9e=h5eee18b_2
   - jupyter_client=8.6.2=pyhd8ed1ab_0
   - jupyter_core=5.7.2=py310hff52083_0
+  - kernel-headers_linux-64=3.10.0=he073ed8_18
   - kiwisolver=1.4.4=py310h6a678d5_0
   - krb5=1.20.1=h143b758_1
   - lcms2=2.12=h3be6417_0
@@ -141,7 +143,7 @@ dependencies:
   - numpy-base=1.26.4=py310hb5e798b_0
   - openjpeg=2.4.0=h9ca470c_2
   - openpyxl=3.1.5=py310h5eee18b_0
-  - openssl=3.3.2=hb9d3cd8_0
+  - openssl=3.5.0=h7b32b05_1
   - orc=2.0.1=h2d29ad5_0
   - packaging=24.1=py310h06a4308_0
   - pandas=2.2.2=py310h6a678d5_0
@@ -179,16 +181,20 @@ dependencies:
   - re2=2022.04.01=h295c915_0
   - readline=8.2=h5eee18b_0
   - s2n=1.3.27=hdbd6064_0
+  - scikit-learn=1.5.0=py310h981052a_1
   - seaborn=0.13.2=py310h06a4308_0
   - setuptools=69.5.1=py310h06a4308_0
+  - shap=0.47.2=cuda118py310h296f28e_0
   - sip=6.7.12=py310h6a678d5_0
   - six=1.16.0=pyhd3eb1b0_1
+  - slicer=0.0.8=py310h2f386ee_0
   - snappy=1.2.1=h6a678d5_0
   - sortedcontainers=2.4.0=pyhd3eb1b0_0
   - sqlite=3.45.3=h5eee18b_0
   - stack_data=0.6.2=pyhd8ed1ab_0
   - statsmodels=0.14.2=py310h5eee18b_0
-  - swifter=1.4.0=pyhd8ed1ab_0
+  - swifter=1.4.0=pyhd8ed1ab_1
+  - sysroot_linux-64=2.17=h0157908_18
   - tbb=2021.8.0=hdb19cb5_0
   - tblib=1.7.0=pyhd3eb1b0_0
   - threadpoolctl=3.5.0=pyhc1e730c_0
@@ -356,7 +362,6 @@ dependencies:
       - s3transfer==0.10.2
       - safetensors==0.4.5
       - scikit-image==0.20.0
-      - scikit-learn==1.4.0
       - scipy==1.12.0
       - sentencepiece==0.2.0
       - seqeval==1.2.2
