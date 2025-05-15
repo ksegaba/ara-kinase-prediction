@@ -448,9 +448,86 @@ y_preds_df.to_csv(
     "data/Kinase_genes/features/Imputed_TAIR10_kinases_final_table_by_bin_cat_cont_type_y_preds.csv",
     index=True, header=True)
 
+###### Insert the protein kinase subfamily information for each gene pair ######
+y_preds_df = pd.read_csv(
+    "data/Kinase_genes/features/Imputed_TAIR10_kinases_final_table_by_bin_cat_cont_type_y_preds.csv")
+
+# Insert whether these gene pairs were previously given to our collaborator
+previous_targets = pd.read_excel("data/Kinase_genes/Melissa_targets.xlsx",
+                                 sheet_name="ML_redundancy_predictions_all", header=0)
+
+# if the gene pair is in previous_targets, set the value to "yes", otherwise
+# "no" and add the column to y_preds_df
+y_preds_df_gp = [tuple(sorted((g1, g2)))
+                 for g1, g2 in zip(y_preds_df["gene1"], y_preds_df["gene2"])]
+previous_targets_gp = [tuple(sorted((g1, g2)))
+                       for g1, g2 in zip(previous_targets["Gene1"], previous_targets["Gene2"])]
+only_in_previous_targets = set(previous_targets_gp).difference(
+    set(y_preds_df_gp))  # these are the ones that were not in the y_preds_df
+
+rows = []
+for g1, g2 in only_in_previous_targets:
+    # add the gene pairs that were not in the y_preds_df
+    rows.append([g1, g2, np.nan, np.nan, np.nan, np.nan])
+
+y_preds_df = pd.concat([y_preds_df, pd.DataFrame(
+    rows, columns=y_preds_df.columns)], axis=0)
+
+# now add the "yes" or "no" column
+y_preds_df_gp2 = [tuple(sorted((g1, g2)))
+                  for g1, g2 in zip(y_preds_df["gene1"], y_preds_df["gene2"])]
+common = set(y_preds_df_gp2).intersection(set(previous_targets_gp))
+
+gp_map = {x: "yes" if x in common else "no" for x in y_preds_df_gp2}
+column = pd.DataFrame.from_dict(gp_map, orient="index", columns=[
+    "In_ML_redundancy_predictions_all"])
+column.index = pd.MultiIndex.from_tuples(
+    column.index, names=["gene1", "gene2"])  # yes, no column
+
+y_preds_df.set_index(["gene1", "gene2"], inplace=True)
+sum(column.index.get_level_values("gene1") ==
+    y_preds_df.index.get_level_values("gene1"))  # same!
+sum(column.index.get_level_values("gene2") ==
+    y_preds_df.index.get_level_values("gene2"))  # same!
+y_preds_df = y_preds_df.merge(
+    column, how="left", left_index=True, right_index=True)
+
+# kinase subfamily information
+subfamilies = pd.read_csv(
+    "data/2012_lehti-shiu_data/Appendix_3_plant_4_kin.class.txt", sep="\t", header=None)
+subfamilies = pd.concat(
+    [subfamilies[0], subfamilies[1].str.split("|", expand=True)], axis=1)
+subfamilies.columns = ["Subfamily", "isoform", "region"]
+subfamilies.shape  # (3649, 3)
+subfamilies["isoform"].nunique()  # 3613, some fall into multiple subfamilies
+subfamilies["gene"] = subfamilies["isoform"].str.split(".", expand=True)[0]
+subfamilies.gene.nunique()  # 3120 unique genes
+gene_subfamily_map = subfamilies.groupby(
+    "gene")["Subfamily"].apply(list).to_dict()
+
+
+def get_subfamily(gene):
+    # Map the gene pairs to their subfamilies
+    value = gene_subfamily_map.get(gene)
+    if isinstance(value, list):
+        return value[0] if len(value) == 1 else value
+    else:
+        return "Not a kinase"
+
+
+y_preds_df.reset_index(inplace=True)
+y_preds_df.insert(6, "gene1_subfamily", y_preds_df.gene1.apply(get_subfamily))
+y_preds_df.insert(7, "gene2_subfamily", y_preds_df.gene2.apply(get_subfamily))
+y_preds_df.to_csv(
+    "data/Kinase_genes/features/Imputed_TAIR10_kinases_final_table_by_bin_cat_cont_type_y_preds_with_subfamilies.csv",
+    index=False, header=True)
+
 # Consolidate which gene pairs were predicted "positive" with higher confidence
-y_preds_df.loc[(y_preds_df["Class_RF_before_FS"] == "positive") &
-               (y_preds_df["Class_RF_FS"] == "positive")].sort_values(
+y_preds_df.loc[y_preds_df["Probability_RF_FS"] > 0.7].sort_values(
     by="Probability_RF_FS", ascending=False).to_csv(
-    "data/Kinase_genes/features/Imputed_TAIR10_kinases_final_table_by_bin_cat_cont_type_y_preds_positive.csv",
-    index=True, header=True)
+        "data/Kinase_genes/features/Imputed_TAIR10_kinases_final_table_by_bin_cat_cont_type_y_preds_positive.csv",
+        index=False)
+y_preds_df.loc[y_preds_df["Probability_RF_FS"] < 0.3].sort_values(
+    by="Probability_RF_FS", ascending=True).to_csv(
+        "data/Kinase_genes/features/Imputed_TAIR10_kinases_final_table_by_bin_cat_cont_type_y_preds_negative.csv",
+        index=False)
