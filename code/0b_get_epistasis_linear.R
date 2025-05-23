@@ -11,9 +11,11 @@ library(performance) # for lmer epistasis stats and check_autocorrelation
 library(emmeans)
 
 # Prepare fitness data
+# data <- read_excel(
+#   'data/20240923_melissa_ara_data/fitness_data_for_Kenia_09232024.xlsx',
+#   sheet='with_border_cells')
 data <- read_excel(
-  'data/20240923_melissa_ara_data/fitness_data_for_Kenia_09232024.xlsx',
-  sheet='with_border_cells')
+  'data/20250403_melissa_ara_data/fitness_data_04032025.xlsx', sheet='Sheet1')
 
 data$MA <- 0
 data[data$Genotype == 'MA', 'MA'] <- 1
@@ -180,7 +182,8 @@ get_epi_stats <- function(set, label, set_df, formula, lmer=TRUE, itx=TRUE){
 }
 
 # Calculate the epistasis values for each plant set and fitness label
-labels <- c('PG', 'DTB', 'LN', 'DTF', 'SN', 'WO', 'FN', 'SPF', 'TSC', 'SH')
+# labels <- c('PG', 'DTB', 'LN', 'DTF', 'SN', 'WO', 'FN', 'SPF', 'TSC', 'SH')
+labels <- c('DTB', 'LN', 'DTF', 'SN', 'SPF', 'TSC')
 counter <- 1
 for (label in labels){
   print(paste0('LABEL ', label, ' -----------------------------------------'))
@@ -195,7 +198,7 @@ for (label in labels){
   if (counter == 1) res <- data.frame() # collect epistasis values of the first label
   if (counter != 1) res2 <- data.frame() # for the other labels
 
-  # Apply transformations to the ORIGINAL label
+  print('Apply transformations to the ORIGINAL label')
   ## pseudolog10
   data[, paste0(label, '_plog10')] <- pseudolog10(data[, label])
   
@@ -228,11 +231,11 @@ for (label in labels){
     if (counter2 != 1) emm_df2 <- data.frame() # the other transformed labels
 
     if (new_label %in% colnames(data)){
-
+      print(paste0('Run linear regression for ', new_label))
       # Run linear regression per set
       progress <- 1
       for (set in unique(data$Set)) {
-
+        print(paste0('Set ', set, ' -----------------------------------------'))
         if (label %in% list('SN', 'WO', 'FN', 'TSC')) {
           set_df <- data[data$Set == set, c('Set', 'Flat', 'Column', 'Row',
             'Number', 'Type', 'Genotype', 'Subline', 'MA', 'MB',
@@ -246,6 +249,10 @@ for (label in labels){
 
         set_df <- set_df[!is.na(set_df[,label]),] # Remove rows with missing values in label
         if (nrow(set_df) == 0) next # skip sets with no data
+        if (length(unique(set_df$Genotype)) < 4) {
+          print('Not enough genotypes to run the model')
+          next
+        }
 
         # Define the linear equation
         if (length(unique(set_df$Flat)) > 1) {
@@ -258,7 +265,7 @@ for (label in labels){
           lmer <- FALSE
         }
 
-        # Calculate the epistasis statistics
+        print('Calculate the epistasis statistics')
         if (endsWith(new_label, '_log10')) { # deal with infinite values
           set_df_sub <- set_df[!is.infinite(set_df[[new_label]]),]
           if (nrow(set_df_sub) == 0) {
@@ -277,7 +284,7 @@ for (label in labels){
         }
 
         if (is.null(out$model) == FALSE) {
-          # Check linear model assumptions
+          print('Check linear model assumptions')
           if (lmer == TRUE) { # Whether to run a mixed-effects model or not
             residuals <- resid(out$model) # For model with the interaction term
             fitted_vals <- fitted(out$model)
@@ -317,7 +324,7 @@ for (label in labels){
               dw_test2$statistic[[1]], dw_test2$p.value)
           }
 
-          # Determine the significance of including the epistasis term
+          print('Determine the significance of including the epistasis term')
           aov_res <- anova(out$model, out_no_int$model) # p-value in aov_res[2,ncol(aov_res)]
 
           # Collect the results
@@ -362,11 +369,15 @@ for (label in labels){
     res <- rbind.fill(res, res2)
   }
 
-  # Save the genotype estimated marginal  means
+  print('Save the genotype estimated marginal means')
   emm_df <- emm_df[, !grepl('\\.x$|\\.y$', colnames(emm_df))]
   emm_df <- emm_df[, !(colnames(emm_df) %in% c('pop_mean'))]
+  # write.table(emm_df, paste0(
+  #   'data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_',
+  #   label, '_emmeans_with_no_int.tsv'),
+  #   row.names=F, quote=F, sep='\t')
   write.table(emm_df, paste0(
-    'data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_',
+    'data/20250403_melissa_ara_data/corrected_data/fitness_data_04032025_',
     label, '_emmeans_with_no_int.tsv'),
     row.names=F, quote=F, sep='\t')
   remove(emm_df, emm_df2, res2) # clear memory
@@ -383,6 +394,9 @@ table(df_results$Epistasis_Direction)
 table(df_results$Label)
 
 # Save the epistasis results
+# write.csv(df_results,
+#   paste0('data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_epistasis_linear_with_no_int.csv'),
+#   row.names=F, quote=F)
 write.csv(df_results,
-  paste0('data/20240923_melissa_ara_data/corrected_data/fitness_data_for_Kenia_09232024_epistasis_linear_with_no_int.csv'),
+  paste0('data/20250403_melissa_ara_data/corrected_data/fitness_data_04032025_epistasis_linear_with_no_int.csv'),
   row.names=F, quote=F)
