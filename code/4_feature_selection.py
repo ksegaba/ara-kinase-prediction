@@ -105,7 +105,7 @@ def generate_sbatch_file(output_dir, X_path, y_path, sbatch_name, tag, feature_s
         f.write(
             f"FEATURE_SETS=($(ls feature_set_above_p*.txt))\n\n")
         if y_path != "":  # loop through each label
-            f.write(f"LABELS=({" ".join(label_list)})\n\n")
+            f.write(f"LABELS=({' '.join(label_list)})\n\n")
             f.write("for label in ${LABELS[@]}; do\n")
         f.write(
             "python /mnt/home/seguraab/Shiu_Lab/ML-Pipeline/ML_classification.py \\\n")
