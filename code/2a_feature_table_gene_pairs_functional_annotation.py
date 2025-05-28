@@ -7,7 +7,9 @@ import os
 import math
 
 # Function to determine the pairing value
-def determine_pair_value(gene1: str, gene2: str , gene_dict: str,action: str = "None") -> float:
+
+
+def determine_pair_value(gene1: str, gene2: str, gene_dict: str, action: str = "None") -> float:
     """_summary_
 
     Args:
@@ -21,9 +23,9 @@ def determine_pair_value(gene1: str, gene2: str , gene_dict: str,action: str = "
     """
     in_gene1 = gene_dict.get(gene1, None)
     in_gene2 = gene_dict.get(gene2, None)
-    
+
     value = 0
-    
+
     # the case where values are not numeric or are missing
     try:
         in_gene1 = float(in_gene1)
@@ -33,8 +35,7 @@ def determine_pair_value(gene1: str, gene2: str , gene_dict: str,action: str = "
         in_gene2 = float(in_gene2)
     except (TypeError, ValueError):
         in_gene2 = math.nan
-    
-    
+
     if math.isnan(in_gene1) or math.isnan(in_gene2):
         value = math.nan
     elif in_gene1 == 1 and in_gene2 == 1:
@@ -43,13 +44,13 @@ def determine_pair_value(gene1: str, gene2: str , gene_dict: str,action: str = "
         value = 1
     else:
         value = 0
-    
+
     if action == 'log':
         Calculated_value = math.log(value) if value > 0 else float('-inf')
     elif action == 'noTF':
         Calculated_value = value
     elif action == 'reciprocal':
-        if value ==0 or math.isnan(value):
+        if value == 0 or math.isnan(value):
             Calculated_value = math.nan
         else:
             Calculated_value = 1/value
@@ -60,21 +61,24 @@ def determine_pair_value(gene1: str, gene2: str , gene_dict: str,action: str = "
             Calculated_value = value**2
     return Calculated_value
 
+
 print("Script started")
 
 # Directory containing JSON files
 # directory = '/home/tangji19/02_Other_Project/01_Kenia/01_feature_generating/AraCyc_pathways/AraCyc'
 directory = '/home/seguraab/ara-kinase-prediction/'
 json_dir = 'data/2021_cusack_data/21_arabidopsis_redundancy/01_functional_annotation/AraCyc_pathways/AraCyc'
-# save_dir = 'data/2021_cusack_data/Dataset_4_Features'
-save_dir = 'data/Kinase_genes/features'
 
 # Ensure the save directory exists
+# save_dir = 'data/2021_cusack_data/Dataset_4_Features'
+# save_dir = 'data/Kinase_genes/features'
+save_dir = 'data/20250403_melissa_ara_data/features'
 if not os.path.exists(os.path.join(directory, save_dir)):
     os.makedirs(save_dir)
 
 # List of all JSON files in the directory
-json_files = [f for f in os.listdir(os.path.join(directory, json_dir)) if f.endswith('.json')]
+json_files = [f for f in os.listdir(os.path.join(
+    directory, json_dir)) if f.endswith('.json')]
 
 # Collect all genes from all files to create a comprehensive list
 # all_genes = set()
@@ -82,20 +86,24 @@ json_files = [f for f in os.listdir(os.path.join(directory, json_dir)) if f.ends
 #     with open(os.path.join(directory, file), 'r') as f:
 #         gene_dict = json.load(f)
 #         all_genes.update(gene_dict.keys())
-        
-# print(len(all_genes))     
+
+# print(len(all_genes))
 
 # Generate all possible gene pairs
 # gene_pairs = list(itertools.combinations(all_genes, 2))
-# print(len(gene_pairs)) 
+# print(len(gene_pairs))
 
 # Input selected instance txt file
 # instance_file = 'instances_dataset_1.txt' # Melissa's gene pairs combined with Dataset_4.txt "test" instances.
 # instance_file = 'data/2021_cusack_data/Dataset_4.txt' # Cusack 2021 Dataset_4.txt as-is
-instance_file = 'data/Kinase_genes/instances_tair10_kinases.txt'
-file_path = os.path.join(directory, instance_file)
-result_df = pd.read_csv(file_path, sep='\t')
+# instance_file = 'data/Kinase_genes/instances_tair10_kinases.txt'
+instance_file = 'data/20250403_melissa_ara_data/corrected_data/binary_labels_from_linear_model.csv'
 
+file_path = os.path.join(directory, instance_file)
+# sep='\t'
+sep = ','
+result_df = pd.read_csv(file_path, sep=sep)
+result_df_dict = {}
 # data = pd.read_csv(file_path, sep='\t')
 # data = data["pair_ID"].str.split("_", expand=True)
 
@@ -107,10 +115,10 @@ print(len(gene_pairs))
 # Dataframe to store the results
 # result_df = pd.DataFrame(gene_pairs, columns=['gene1', 'gene2'])
 print(result_df.shape)
-actions = ["log","noTF","reciprocal","squared"]
+actions = ["log", "noTF", "reciprocal", "squared"]
 
 # Process each JSON file and generate the respective column in the dataframe
-for index, file  in enumerate(json_files):
+for index, file in enumerate(json_files):
     # file_path = os.path.join(directory, file)
     file_path = os.path.join(directory, json_dir, file)
     print('json file:', index+1)
@@ -118,13 +126,13 @@ for index, file  in enumerate(json_files):
         gene_dict = json.load(f)
         for action in actions:
             column_values = [
-            determine_pair_value(pair[0], pair[1], gene_dict,action) for pair in gene_pairs
+                determine_pair_value(pair[0], pair[1], gene_dict, action) for pair in gene_pairs
             ]
             file_name = file.split('_dictionary')[0]
             column_name = f"Continuous_{file_name}_Number_in_pair_{action}"
-            result_df[column_name] = column_values
-            print(result_df.shape)
-            print(result_df.columns)
+            result_df_dict[column_name] = column_values
+            # print(result_df.shape)
+            # print(result_df.columns)
     # if (index+1)%4 == 0:
     #     file_number = (index+1)//4
     #     report_file_name=f'report_{file_number}.txt'
@@ -132,7 +140,12 @@ for index, file  in enumerate(json_files):
     #     report_file_path = os.path.join(report_dir, report_file_name)
     #     result_df.to_csv(report_file_path, sep='\t', index=False)
     #     result_df = pd.DataFrame(gene_pairs, columns=['gene1', 'gene2'])
+
 # Save the result to a text file
+result_df_dict = pd.DataFrame(result_df_dict)
+result_df = pd.concat([result_df[['gene1', 'gene2']], result_df_dict], axis=1)
 # result_df.to_csv('/home/tangji19/02_Other_Project/01_Kenia/01_feature_generating/AraCyc_pathways/gene_pairs.txt', sep='\t', index=False, na_rep='NaN')
 # result_df.to_csv(os.path.join(directory, save_dir, 'Dataset_4_features_functional_annotations.txt'), sep='\t', index=False, na_rep='NaN')
-result_df.to_csv(os.path.join(directory, save_dir, 'TAIR10_kinases_features_functional_annotations.txt'), sep='\t', index=False, na_rep='NaN')
+# result_df.to_csv(os.path.join(directory, save_dir, 'TAIR10_kinases_features_functional_annotations.txt'), sep='\t', index=False, na_rep='NaN')
+result_df.to_csv(os.path.join(directory, save_dir,
+                 '20250403_melissa_ara_features_for_binary_clf_functional_annotations.txt'), sep='\t', index=False, na_rep='NaN')
