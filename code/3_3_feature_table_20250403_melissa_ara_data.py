@@ -187,11 +187,13 @@ X_test = X.loc[y_test.index, :].copy(deep=True)
 
 labels_df.insert(1, "dataset", labels_df.apply(
     lambda x: "test" if x.name in y_test.index else "train", axis=1))
+labels_df.insert(0, "ID", labels_df.apply(
+    lambda x: "_".join(x.name), axis=1))  # create ID column
 labels_df.to_csv(
     "data/20250403_melissa_ara_data/corrected_data/binary_labels_from_linear_model_split.csv",
-    index=True, header=True)  # save the train-test split
+    index=False, header=True)  # save the train-test split
 test_instances = labels_df[labels_df["dataset"] == "test"].reset_index()
-test_instances.apply(lambda x: f"{x.gene1}_{x.gene2}", axis=1).to_csv(
+test_instances["ID"].to_csv(
     "data/20250403_melissa_ara_data/corrected_data/binary_labels_from_linear_model_test_instances.csv",
     index=False, header=False)  # save the test instances
 
