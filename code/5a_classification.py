@@ -5,7 +5,6 @@ Binary Classification with XGBoost or AutoGluon
 Required Inputs
 	-X      Path to feature matrix file
 	-y_name Column name of label in X matrix
-	-test   File containing list of test instances
 	-save   FULL path to save output files to
 	-prefix Prefix of output file names
 	-alg    Algorithm to use (xgboost or autogluon)
@@ -16,6 +15,8 @@ Required Inputs
 	-feat_list Comma-separated list of features (from X) to include in model
 	-bal    Balance the training set (y/n, default is n)
 	-n_bal  Number of balanced datasets to create (default is 15)
+	-test   File containing list of test instances
+	-size   Size of test set (default is 1/11 of the data; include if no test file is provided)
 	
 	# Optional feature selection arguments
 	-fs     Whether to perform feature selection or not (y/n, default is n)
@@ -93,8 +94,6 @@ def parse_args():
     req_group.add_argument(
         "-y_name", help="name of label in X file", required=True)
     req_group.add_argument(
-        "-test", help="path to file of test set instances", required=True)
-    req_group.add_argument(
         "-save", help="path to save output files to", required=True)
     req_group.add_argument(
         "-prefix", help="prefix of output file names", required=True)
@@ -122,6 +121,10 @@ def parse_args():
         default="n")
     dp_group.add_argument(
         "-n_bal", help="number of balanced datasets to create", default=15, type=int)
+    dp_group.add_argument(
+        "-test", help="path to file of test set instances", default="", type=str)
+    dp_group.add_argument(
+        "-size", help="size of test set (default is 1/11 of the data)", default=1/11, type=float)
 
     # Optional feature selection arguments
     fs_group = parser.add_argument_group(title="Optional Feature Selection")
@@ -575,6 +578,7 @@ def run_autogluon(X_train, X_test, y_train, y_test, label, path, prefix):
 
     # Evaluation
     y_pred = predictor.predict(X_test_norm.drop(columns=[label]))
+    print(y_pred)
     predictor.evaluate(X_test_norm, silent=True)
     predictor.leaderboard(X_test_norm).to_csv(f'{prefix}_RESULTS.csv')
 
@@ -630,7 +634,7 @@ if __name__ == "__main__":
             y_test = y.loc[test.iloc[:, 0]]
     else:
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=1/11, random_state=2305, stratify=y)
+            X, y, test_size=args.size, random_state=2305, stratify=y)
 
     # Convert classes to binary if not already
     y_class_map = {}
