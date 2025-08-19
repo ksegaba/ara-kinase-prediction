@@ -12,16 +12,36 @@ import dask.dataframe as dd
 __author__ = 'Kenia Segura Abá'
 
 
-def dict_val_counts(dictionary, val_idx=None):
-    '''Similar to pandas value_counts() method. This function counts the number 
-    of keys with the same value in a dictionary. The function does not work on 
-    nested dictionaries.
+def filter_alignments(df, qcol, scol, bitcol):
+    '''Filter the BLAST alignments based on e-value and bitscore.
+    To drop duplicate alignments, keep the one with the lowest e-value and
+    highest bitscore.
+    '''
+    #
+    # Remove the isoform and additional info from the protein/cds IDs and sort the pair
+    df['query_protein'] = df[qcol].str.split('.').str[0]
+    df['subject_protein'] = df[scol].str.split('.').str[0]
+    df['protein_pair'] = df.apply(
+        lambda row: tuple(sorted([row['query_protein'], row['subject_protein']])), axis=1)
+    # df.groupby('protein_pair')['pident'].std().sort_values(ascending=False)
+    # Sort and filter by e-value and bitscore
+    df = df.sort_values(
+        by=['evalue', bitcol], ascending=[True, False])
+    df = df.drop_duplicates(subset='protein_pair', keep='first')
+    #
+    return df
 
+
+def dict_val_counts(dictionary, val_idx=None):
+    '''Similar to pandas value_counts() method. This function counts the number
+    of keys with the same value in a dictionary. The function does not work on
+    nested dictionaries.
+    #
     Parameters:
             - dictionary (dict): A dictionary with keys and values (float, int, str, or list)
             - val_idx (int): The index of the element of interest if the value is a list
     '''
-
+    #
     inverted_dict = {}
     for key, value in dictionary.items():
         if (not isinstance(value, list)) and (value not in inverted_dict.keys()):  # value is not a list
@@ -34,56 +54,25 @@ def dict_val_counts(dictionary, val_idx=None):
                 inverted_dict[value].append(key)
             else:
                 inverted_dict[value[val_idx]].append(key)
-
+    #
     # Count the number of keys for each value
     dict_counts = {value: len(keys) for value, keys in inverted_dict.items()}
     print(dict_counts)
 
 
-# def calc_binary_adj_feat_values(adj, col_name):
-# 	'''Extract the binary feature values for gene pairs in the `genes` file
-# 	from an adjacency matrix'''
-
-# 	G = nx.from_pandas_adjacency(adj)
-
-# 	features = []
-# 	for i in tqdm(range(len(genes))):
-# 		gene1 = genes.gene1[i]
-# 		gene2 = genes.gene2[i]
-
-# 		# Calculate feature values
-# 		try:
-# 			# get the edge value
-# 			edge = [e for e in list(G.edges()) \
-# 					if (gene1 in e[0] or gene1 in e[1]) \
-# 					and (gene2 in e[0] or gene2 in e[1])]
-# 			if len(edge) == 0:
-# 				features.append([gene1, gene2, 0])
-# 			else:
-# 				features.append([gene1, gene2, 1])
-
-# 		except nx.exception.NetworkXError:
-# 			# At least one gene identifier is not in the network
-# 			features.append([gene1, gene2, np.nan])
-
-# 	col_names=['gene1', 'gene2', col_name]
-
-# 	return pd.DataFrame(features, columns=col_names)
-
-
 def calc_binary_adj_feat_values(adj, col_name, genes):
-    '''Extract the binary feature values for gene pairs in the `genes` file 
+    '''Extract the binary feature values for gene pairs in the `genes` file
     from an adjacency matrix.'''
-
+    #
     # Create graph from adjacency matrix
     G = nx.from_pandas_adjacency(adj)
-
+    #
     # Unique edges in the graph
     edges_set = set(G.edges())
-
+    #
     # New feature values
     features = []
-
+    #
     # Iterate through the gene pairs
     for gene1, gene2 in tqdm(zip(genes.gene1, genes.gene2), total=len(genes), desc="Processing gene pairs"):
         # Verify if the edge exists in the graph
@@ -91,48 +80,10 @@ def calc_binary_adj_feat_values(adj, col_name, genes):
             features.append([gene1, gene2, 1])  # Edge exists
         else:
             features.append([gene1, gene2, 0])  # No edge
-
+    #
     # Return the feature as a DataFrame
     col_names = ['gene1', 'gene2', col_name]
     return pd.DataFrame(features, columns=col_names).set_index(['gene1', 'gene2'])
-
-
-# def apply_transformations(values, method):
-# 	''' Apply transformations to a dataframe of continuous feature values.
-
-# 	Args:
-# 		- df (pd.DataFrame): A data frame of feature values
-# 		- chklst_df (pd.DataFrame): Feature engineering checklist
-
-# 	Returns an expanded dataframe with additional transformations on continuous columns:
-# 		- Binned values
-# 		- Logarithm
-# 		- Reciprocal
-# 		- Squared
-# 	'''
-
-# 	# Apply the transformations to individual columns
-# 	if method == 'Binary':
-# 		return values
-
-# 	if method == 'Continuous':
-# 		if values.name.endswith('_binned'):
-# 			# Bin the feature value
-# 			new_values = pd.qcut(values, q=4, labels=False, duplicates='drop')
-# 		elif values.name.endswith('_log'):
-# 			# Calculate the log
-# 			new_values = values.apply(lambda x: np.log10(x) if x > 0 else np.nan)
-# 		elif values.name.endswith('_reciprocal'):
-# 			# Calculate the reciprocal
-# 			new_values = values.apply(lambda x: 1/x if x != 0 else np.nan)
-# 		elif values.name.endswith('_squared'):
-# 			# Calculate the square
-# 			new_values = values ** 2
-# 		elif values.name.endswith('_noTF'):
-# 			# No transformation applied
-# 			return values
-
-# 		return new_values
 
 
 def calc_feature_values(gene1_values_df, gene2_values_df, cols, calc_type):
@@ -146,7 +97,7 @@ def calc_feature_values(gene1_values_df, gene2_values_df, cols, calc_type):
     Returns:
             nested dictionary: gene pair tuples as outermost keys, column names in gene_values as innermost keys
     """
-
+    #
     # Vectorized calculation of feature values
     if calc_type in ['Number in pair', 'Pair total']:
         result = gene1_values_df.values + gene2_values_df.values
@@ -161,22 +112,22 @@ def calc_feature_values(gene1_values_df, gene2_values_df, cols, calc_type):
     else:
         # Default to None for unsupported calc_type
         result = np.full_like(gene1_values_df.values, None)
-
+    #
     # Crear un DataFrame con los resultados
     result_df = pd.DataFrame(result, columns=[
                              f"{col}_{calc_type.lower().replace(' ', '_')}" for col in cols])
     result_df.index = pd.MultiIndex.from_arrays(
         [gene1_values_df.index, gene2_values_df.index], names=["gene1", "gene2"])
-
+    #
     return result_df
 
 
 def apply_transformations_df(df):
     ''' Apply transformations to a dataframe of continuous feature values.
-
+    #
     Args:
             - df (pd.DataFrame): A data frame of feature values
-
+    #
     Returns an expanded dataframe with additional transformations on continuous columns:
             - Binned values
             - Logarithm
@@ -186,47 +137,48 @@ def apply_transformations_df(df):
     # df_list = []
     df_reset = df.reset_index()
     transformed_columns = {}
-
+    #
     # Apply the transformations to individual columns
     for column in tqdm(df.columns, desc="Processing transformations"):
         if column not in df.index.names:
             # No transformation applied
             transformed_columns[column + '_noTF'] = df_reset[column]
-
+            #
             # Bin the feature value
             transformed_columns[column + '_binned'] = pd.qcut(
                 df_reset[column], q=4, labels=False, duplicates='drop')
-
+            #
             # Calculate the log
             with np.errstate(divide='ignore', invalid='ignore'):
                 transformed_columns[column + '_log'] = np.where(
                     df_reset[column] > 0, np.log10(df_reset[column]), np.nan)
-
+            #
             # Calculate the reciprocal
             transformed_columns[f"{column}_reciprocal"] = np.where(
                 df_reset[column] != 0, 1 / df_reset[column], np.nan)
-
+            #
             # Calculate the square
             transformed_columns[f"{column}_squared"] = df_reset[column] ** 2
-
+    #
     # Concatenate the transformed columns into a single DataFrame
-    transformed_df = pd.DataFrame(transformed_columns, index=df_reset.index)
-
+    transformed_df = pd.DataFrame(transformed_columns, index=df.index)
+    #
     return transformed_df
 
 
 def calc_continuous_feat_values(col_list, paml_feat, checklist, feat_set="paml"):
     '''Create the paml feature table for gene pairs in the `genes` file.'''
-
+    #
     cols = [col for col in paml_feat.loc[:, col_list].columns
             if not ('_binned' in col or '_log' in col
-                    or '_reciprocal' in col or '_squared' in col)]  # columns to calculate feature values for
-
+                    # columns to calculate feature values for
+                    or '_reciprocal' in col or '_squared' in col)]
+    #
     # Get the feature values for each gene
     feature_values = paml_feat[cols].T.to_dict()  # genes as keys
     gene1_values = genes.gene1.map(feature_values)
     gene2_values = genes.gene2.map(feature_values)
-
+    #
     # Create feature value dataframes that correspond to the gene pairs in genes
     na_vals = {col: np.nan for col in cols}
     gene1_values = gene1_values.apply(lambda x: na_vals if pd.isna(x) else x)
@@ -235,7 +187,7 @@ def calc_continuous_feat_values(col_list, paml_feat, checklist, feat_set="paml")
     gene2_values = gene2_values.apply(lambda x: na_vals if pd.isna(x) else x)
     gene2_values_df = pd.DataFrame.from_records(
         gene2_values.values, index=genes.gene2)
-
+    #
     cols_features = []
     for i, row in tqdm(checklist.iterrows(), total=len(checklist), desc="Processing features"):
         if feat_set == "paml":
@@ -251,18 +203,44 @@ def calc_continuous_feat_values(col_list, paml_feat, checklist, feat_set="paml")
                                                   cols, row["Calculation for gene pair"])
                 cols_features.append(cols_values)
                 del cols_values
-
+    #
     print("Combine features into a single dataframe...")
     cols_features_df = pd.concat(cols_features, axis=1, ignore_index=False)
-
+    #
     # Remove duplicate columns (not sure why this happens)
     cols_features_df = cols_features_df.loc[:,
                                             ~cols_features_df.columns.duplicated()]
-
+    #
     # cols_features.index = pd.MultiIndex.from_tuples(list(cols_features.index), names=["gene1", "gene2"])
     del cols_features
-
+    #
     # Apply transformations
+    cols_features_df = apply_transformations_df(cols_features_df)
+    #
+    return cols_features_df
+
+
+def calc_continuous_alignment_features(genes, df, checklist, prefix='blastp'):
+    '''Get the percent identity for each gene pair from the alignment data if it
+    is available. Apply the '''
+
+    # Generate the feature values for each gene pair
+    sorted_pairs = genes.apply(
+        lambda row: tuple(sorted([row['gene1'], row['gene2']])), axis=1)
+
+    def get_pident_value(pair):
+        try:
+            return df.loc[df['protein_pair'] == pair, 'pident'].values[0]
+        except IndexError:
+            return np.nan
+
+    feature_values = sorted_pairs.map(get_pident_value)
+
+    # Transform the feature values
+    cols_features_df = pd.DataFrame(
+        feature_values, columns=[f'{prefix}_pident'])
+    cols_features_df.index = pd.MultiIndex.from_arrays(
+        [genes.gene1, genes.gene2], names=["gene1", "gene2"])
     cols_features_df = apply_transformations_df(cols_features_df)
 
     return cols_features_df
@@ -271,6 +249,7 @@ def calc_continuous_feat_values(col_list, paml_feat, checklist, feat_set="paml")
 if __name__ == '__main__':
     os.chdir('/home/seguraab/ara-kinase-prediction/')
 
+    ############################################################################
     print("Reading the data...")
     # Feature checklist file
     checklist = pd.read_csv(
@@ -286,6 +265,25 @@ if __name__ == '__main__':
     blast_hits.set_index('gene', inplace=True)
     blast_hits = blast_hits.astype(int)  # convert boolean to binary
 
+    # Open the gene pair feature tables (protein and nucleotide sequence similarity)
+    blastp = dt.fread(
+        'data/evolutionary_properties_data/4_seq_similarity_res/blastp_At_protein_primaryTranscriptOnly_pairwise.txt').to_pandas()
+    blastp.columns = ['qseqid', 'sseqid', 'pident', 'evalue', 'bitscore',
+                      'score', 'length', 'nident', 'mismatch', 'gapopen',
+                      'gaps', 'qlen', 'slen', 'qstart', 'qend', 'sstart', 'send']
+
+    tblastx = dt.fread(
+        'data/evolutionary_properties_data/4_seq_similarity_res/tblastx_At_cds_primaryTranscriptOnly_pairwise.txt').to_pandas()
+    tblastx.columns = ['qacc', 'sacc', 'length', 'qlen', 'slen', 'qstart',
+                       'qend', 'sstart', 'send', 'evalue', 'bitscore', 'pident']
+
+    mmseqs_prot = dt.fread(
+        'data/evolutionary_properties_data/4_seq_similarity_res/mmseqs2_At_protein_primaryTranscriptOnly_pairwise.txt').to_pandas()
+
+    mmseqs_nucl = dt.fread(
+        'data/evolutionary_properties_data/4_seq_similarity_res/mmseqs2_At_cds_primaryTranscriptOnly_pairwise.txt').to_pandas()
+
+    ############################################################################
     print("Preparing the data...")
     # Calculate the median dN, dS, and dN/dS values across splice variants of a gene
     paml_feat["gene"] = paml_feat["C0"].str.split(
@@ -301,6 +299,17 @@ if __name__ == '__main__':
                           groupby(col_groups, axis=1).any()).astype(int)
     blast_dict = blast_hits_grouped.to_dict()
 
+    # Filter out duplicate pairs from the BLAST/MMseqs2 results
+    blastp = filter_alignments(
+        blastp, qcol='qseqid', scol='sseqid', bitcol='bitscore')
+    tblastx = filter_alignments(
+        tblastx, qcol='qacc', scol='sacc', bitcol='bitscore')
+    mmseqs_prot = filter_alignments(
+        mmseqs_prot, qcol='query', scol='target', bitcol='bits')
+    mmseqs_nucl = filter_alignments(
+        mmseqs_nucl, qcol='query', scol='target', bitcol='bits')
+
+    ############################################################################
     print("Reading in the gene pairs...")
     # Instances file
     # genes = pd.read_csv('data/instances_dataset_1.txt', sep='\t')
@@ -327,7 +336,22 @@ if __name__ == '__main__':
     features['Reciprocal best match'] = calc_binary_adj_feat_values(
         blast_hits_grouped, "binary_reciprocal_best_match", genes)
 
-    # Make the rest of the features
+    print("Make the sequence alignment features...")
+    features['Amino acid sequence'] = pd.concat(
+        [calc_continuous_alignment_features(
+            genes, blastp, checklist, prefix='blastp'),
+         calc_continuous_alignment_features(
+            genes, mmseqs_prot, checklist, prefix='mmseqs_prot')],
+        ignore_index=False)
+
+    features['Nucleotide sequence'] = pd.concat(
+        [calc_continuous_alignment_features(
+            genes, tblastx, checklist, prefix='tblastx'),
+         calc_continuous_alignment_features(
+            genes, mmseqs_nucl, checklist, prefix='mmseqs_nucl')],
+        ignore_index=False)
+
+    print("Making the rest of the features...")
     feat_name = ['Gene family size', 'Lethality binary', 'Lethality score',
                  'Retention rate']
     col_list = ['continuous_gene_family_size', 'binary_lethality',
@@ -346,9 +370,9 @@ if __name__ == '__main__':
         print(key, table.shape)
         print(table.isna().sum(axis=0) / table.shape[0])  # % missing data
         # many gene pairs don't have any features
-        if key != 'Reciprocal best match':
-            table.index = pd.MultiIndex.from_arrays(
-                [genes['gene1'].values, genes['gene2'].values], names=["gene1", "gene2"])
+        # if key != 'Reciprocal best match':
+        #     table.index = pd.MultiIndex.from_arrays(
+        #         [genes['gene1'].values, genes['gene2'].values], names=["gene1", "gene2"])
         # table.to_csv(
         # 	f'data/2021_cusack_data/Dataset_4_Features/Dataset_4_features_evolutionary_properties_{key.replace("/", "_")}.txt',
         # 	sep='\t', chunksize=100, index=True)
@@ -358,11 +382,6 @@ if __name__ == '__main__':
         table.to_csv(
             f'data/20250403_melissa_ara_data/features/20250403_melissa_ara_features_for_binary_clf_evolutionary_properties_{key.replace("/", "_").replace(" ", "_")}.txt',
             sep='\t', index=True)
-    # pd.concat(features.values(), axis=1, ignore_index=False).to_csv(
-    # 	'data/Kinase_genes/features/TAIR10_kinases_features_evolutionary_properties_updated.txt',
-    # 	sep='\t', chunksize=100)
-    # ddf = dd.from_pandas(pd.concat(features.values(), axis=1, ignore_index=False), npartitions=10)
-    # ddf.to_csv('data/Kinase_genes/features/TAIR10_kinases_features_evolutionary_properties_updated.txt', sep='\t')
 
     # Update the checklist, since I made more features than in Cusack et al. 2021 original checklist
     # Note: use the columns from TAIR10_kinases_features_evolutionary_properties_updated.txt to update the checklist
@@ -416,7 +435,8 @@ if __name__ == '__main__':
 
     '''############################################################################
 	# Check how many of our kinase gene pair instances have single gene lethality data
-	uniq_genes = set(genes.gene1.unique().tolist() + genes.gene2.unique().tolist())
+	uniq_genes = set(genes.gene1.unique().tolist() + \
+	                 genes.gene2.unique().tolist())
 
 	num_with_data = []
 	for gene in uniq_genes:
@@ -426,13 +446,17 @@ if __name__ == '__main__':
 	len(num_with_data)
 
 	# Check how many of our kinase gene pairs have gene interaction info on Biogrid
-	gi = pd.read_csv('data/BIOGRID_data/arabidopsis_gi_biogrid.txt', sep='\t', header=None)
-	pair_sets = {tuple(sorted([gene1, gene2])) for gene1, gene2 in zip(genes.gene1, genes.gene2)}
-	gi_sets = {tuple(sorted([gene1, gene2])) for gene1, gene2 in zip(gi[5], gi[6])}
+	gi = pd.read_csv(
+	    'data/BIOGRID_data/arabidopsis_gi_biogrid.txt', sep='\t', header=None)
+	pair_sets = {tuple(sorted([gene1, gene2]))
+	                   for gene1, gene2 in zip(genes.gene1, genes.gene2)}
+	gi_sets = {tuple(sorted([gene1, gene2]))
+	                 for gene1, gene2 in zip(gi[5], gi[6])}
 	len(gi_sets) # 294 unique gene pairs from BIOGRID
-	
-	gi_sets_with_dups = [tuple(sorted([gene1, gene2])) for gene1, gene2 in zip(gi[5], gi[6])]
-	
+
+	gi_sets_with_dups = [tuple(sorted([gene1, gene2]))
+	                           for gene1, gene2 in zip(gi[5], gi[6])]
+
 	from collections import Counter
 	dict_val_counts(Counter(gi_sets_with_dups))
 	pair_sets.intersection(gi_sets) # only 7 gene pairs
