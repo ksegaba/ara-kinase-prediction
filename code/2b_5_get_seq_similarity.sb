@@ -1,0 +1,79 @@
+#!/bin/bash --login
+#SBATCH --job-name=seq_alignment
+#SBATCH --output=seq_alignment_%A_%a.out
+#SBATCH --error=seq_alignment_%A_%a.err
+#SBATCH --time=150:00:00
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=28
+#SBATCH --mem=20G
+
+module purge
+
+OUTDIR=4_seq_similarity_res
+# diamond version 2.1.13
+
+################# Approach 1: DIAMOND BLASTp and NCBI tBLASTx ##################
+# Create a BLAST database from the protein or nucleotide fasta file
+path=/mnt/research/glbrc_group/shiulab/kenia/ncbi-blast-2.13.0+/bin
+${path}/diamond makedb --in Athaliana_167_protein_primaryTranscriptOnly.fa \
+	-d At_protein_primaryTranscriptOnly_db
+
+${path}/makeblastdb -in Athaliana_167_cds_primaryTranscriptOnly.fa \
+	-out Athaliana_167_cds_primaryTranscriptOnly_db -dbtype nucl
+
+# Protein sequence alignment: Run BLASTp for each sequence pair
+${path}/diamond blastp --db At_protein_primaryTranscriptOnly_db \
+	--query Athaliana_167_protein_primaryTranscriptOnly.fa \
+	--outfmt 6 qseqid sseqid pident evalue bitscore score length nident mismatch gapopen gaps qlen slen qstart qend sstart send \
+	--max-target-seqs 3 --no-self-hits --ultra-sensitive \
+	--out ${OUTDIR}/blastp_At_protein_primaryTranscriptOnly_pairwise.txt
+
+# Nucleotide sequence alignment: Run tBLASTx for each sequence pair
+${path}/tblastx -query Athaliana_167_cds_primaryTranscriptOnly.fa \
+	-db Athaliana_167_cds_primaryTranscriptOnly_db \
+	-max_target_seqs 3 \
+	-outfmt '6 qacc sacc length qlen slen qstart qend sstart send evalue bitscore pident' \
+	-out ${OUTDIR}/tblastx_At_cds_primaryTranscriptOnly_pairwise.txt
+
+################### Approach 2: MMseqs2 and extract top hits ###################
+grep '^>' Athaliana_167_protein_primaryTranscriptOnly.fa | sed 's/^>//' > At_protein_primaryTranscriptOnly_ids.txt
+grep '^>' Athaliana_167_cds_primaryTranscriptOnly.fa | sed 's/^>//' > At_cds_primaryTranscriptOnly_ids.txt
+
+# Create the sequence databases
+mmseqs createdb Athaliana_167_protein_primaryTranscriptOnly.fa At_protein_primaryTranscriptOnly_db
+mmseqs createdb Athaliana_167_cds_primaryTranscriptOnly.fa At_cds_primaryTranscriptOnly_db
+
+mmseqs createindex At_protein_primaryTranscriptOnly_db tmp_index_At_protein_primaryTranscriptOnly_db
+mmseqs createindex At_cds_primaryTranscriptOnly_db tmp_index_At_cds_primaryTranscriptOnly_db
+
+# Run MMseqs2 search for protein sequences
+mmseqs search At_protein_primaryTranscriptOnly_db \
+	At_protein_primaryTranscriptOnly_db \
+	${OUTDIR}/mmseqs2_At_protein_primaryTranscriptOnly_pairwise \
+	tmp_index_At_protein_primaryTranscriptOnly_db \
+	--start-sens 1 --sens-steps 3 -s 7 --max-seqs 27416 --min-seq-id 0.0
+
+mmseqs convertalis At_protein_primaryTranscriptOnly_db \
+	At_protein_primaryTranscriptOnly_db \
+	${OUTDIR}/mmseqs2_At_protein_primaryTranscriptOnly_pairwise \
+	${OUTDIR}/mmseqs2_At_protein_primaryTranscriptOnly_pairwise.txt \
+	--format-output "query,target,pident,evalue,bits,gapopen,alnlen,raw,mismatch,qcov,tcov" \
+	--format-mode 4
+
+# Run MMseqs2 search for nucleotide sequences
+mmseqs search At_cds_primaryTranscriptOnly_db \
+	At_cds_primaryTranscriptOnly_db \
+	${OUTDIR}/mmseqs2_At_cds_primaryTranscriptOnly_pairwise \
+	tmp_index_At_cds_primaryTranscriptOnly_db \
+	--start-sens 1 --sens-steps 3 -s 7 --max-seqs 27416 --min-seq-id 0.0 \
+	--search-type 3
+
+mmseqs convertalis At_cds_primaryTranscriptOnly_db \
+	At_cds_primaryTranscriptOnly_db \
+	${OUTDIR}/mmseqs2_At_cds_primaryTranscriptOnly_pairwise \
+	${OUTDIR}/mmseqs2_At_cds_primaryTranscriptOnly_pairwise.txt \
+	--format-output "query,target,pident,evalue,bits,gapopen,alnlen,raw,mismatch,qcov,tcov" \
+	--format-mode 4 --search-type 3
+
+
+scontrol show job $SLURM_JOB_ID
