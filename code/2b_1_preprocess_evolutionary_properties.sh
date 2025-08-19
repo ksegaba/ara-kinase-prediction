@@ -17,6 +17,10 @@ Actual Third:
   - Back translate MUSCLE alignments to nucleotide coding sequence alignments
   - Calculate the evolutionary rate (Ka/Ks) for each gene with PAML
   - Calculate the nucleotide and amino acid sequence similarity with EMBOSS Needle
+
+Fourth:
+  - Calculate the protein sequence similarity with DIAMOND BLASTp or MMseqs2
+  - Calculate the nucleotide sequence similarity with tBLASTx or MMseqs2
 '
 
 # Author: Kenia Segura Abá
@@ -189,6 +193,10 @@ python /home/seguraab/ara-kinase-prediction/code/2b_4_run_paml_yn00.py \
   -out_dir /home/seguraab/ara-kinase-prediction/data/evolutionary_properties_data/3_paml_res/actual_out
 conda deactivate
 
+
+############## Fourth. Sequence similarity with BLAST or MMseqs2 ###############
+### This was submitted in the hpcc as a job array
+sbatch 2b_5_get_seq_similarity.sb
 
 ###### CODE GRAVEYARD: Didn't use them, but want to keep. They work well. ######
 ######################## Third. Gene Trees with RAxML ##########################
