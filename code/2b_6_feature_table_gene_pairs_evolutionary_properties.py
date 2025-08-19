@@ -342,14 +342,14 @@ if __name__ == '__main__':
             genes, blastp, checklist, prefix='blastp'),
          calc_continuous_alignment_features(
             genes, mmseqs_prot, checklist, prefix='mmseqs_prot')],
-        ignore_index=False)
+        ignore_index=False, axis=1)
 
     features['Nucleotide sequence'] = pd.concat(
         [calc_continuous_alignment_features(
             genes, tblastx, checklist, prefix='tblastx'),
          calc_continuous_alignment_features(
             genes, mmseqs_nucl, checklist, prefix='mmseqs_nucl')],
-        ignore_index=False)
+        ignore_index=False, axis=1)
 
     print("Making the rest of the features...")
     feat_name = ['Gene family size', 'Lethality binary', 'Lethality score',
