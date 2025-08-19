@@ -337,19 +337,20 @@ if __name__ == '__main__':
         blast_hits_grouped, "binary_reciprocal_best_match", genes)
 
     print("Make the sequence alignment features...")
-    features['Amino acid sequence'] = pd.concat(
-        [calc_continuous_alignment_features(
-            genes, blastp, checklist, prefix='blastp'),
-         calc_continuous_alignment_features(
+    pd.concat([calc_continuous_alignment_features(
+        genes, blastp, checklist, prefix='blastp'),
+        calc_continuous_alignment_features(
             genes, mmseqs_prot, checklist, prefix='mmseqs_prot')],
-        ignore_index=False, axis=1)
-
-    features['Nucleotide sequence'] = pd.concat(
-        [calc_continuous_alignment_features(
-            genes, tblastx, checklist, prefix='tblastx'),
-         calc_continuous_alignment_features(
+        ignore_index=False, axis=1).to_csv(
+        f'data/20250403_melissa_ara_data/features/20250403_melissa_ara_features_for_binary_clf_evolutionary_properties_Amino_acid_sequence.txt',
+        sep='\t', index=True)
+    pd.concat([calc_continuous_alignment_features(
+        genes, tblastx, checklist, prefix='tblastx'),
+        calc_continuous_alignment_features(
             genes, mmseqs_nucl, checklist, prefix='mmseqs_nucl')],
-        ignore_index=False, axis=1)
+        ignore_index=False, axis=1).to_csv(
+        f'data/20250403_melissa_ara_data/features/20250403_melissa_ara_features_for_binary_clf_evolutionary_properties_Nucleotide_sequence.txt',
+        sep='\t', index=True)
 
     print("Making the rest of the features...")
     feat_name = ['Gene family size', 'Lethality binary', 'Lethality score',
