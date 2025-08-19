@@ -6,7 +6,7 @@ import warnings
 import pandas as pd
 import numpy as np
 from collections import defaultdict
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold
 from sklearn.impute import KNNImputer
 from sklearn.metrics import mean_squared_error
 
@@ -124,7 +124,7 @@ dfs = [pd.read_csv(os.path.join("data/20250403_melissa_ara_data/features", f),
                    sep="\t").set_index(["gene1", "gene2"]) for f in feat_files]
 X = pd.concat(dfs, axis=1, ignore_index=False)
 del dfs
-X.shape  # (138, 5316)
+X.shape  # (138, 5336)
 
 ######## Determine the feature types (binary, categorical, continuous) #########
 # By inspecting the feature engineering checklist:
@@ -178,61 +178,59 @@ feature_types.to_csv(
 feature type. I don't want to make many imputated feature tables for each label
 since I want to be able to compare model performance across labels.'''
 
-# Stratified train-test split based on binary_combined_p05 label
+# Round robin stratified train-test split based on binary_combined_p05 label
 labels_df = labels_df.set_index(["gene1", "gene2"])
-y_train, y_test = train_test_split(labels_df, test_size=1/11, random_state=2805,
-                                   stratify=labels_df["binary_combined_p05"])
-X_train = X.loc[y_train.index, :].copy(deep=True)
-X_test = X.loc[y_test.index, :].copy(deep=True)
-
-labels_df.insert(1, "dataset", labels_df.apply(
-    lambda x: "test" if x.name in y_test.index else "train", axis=1))
-labels_df.insert(0, "ID", labels_df.apply(
-    lambda x: "_".join(x.name), axis=1))  # create ID column
-labels_df.to_csv(
-    "data/20250403_melissa_ara_data/corrected_data/binary_labels_from_linear_model_split.csv",
-    index=False, header=True)  # save the train-test split
-test_instances = labels_df[labels_df["dataset"] == "test"].reset_index()
-test_instances["ID"].to_csv(
-    "data/20250403_melissa_ara_data/corrected_data/binary_labels_from_linear_model_test_instances.csv",
-    index=False, header=False)  # save the test instances
-
-# Determing the best k for imputing each feature type
-type_list = ["binary", "categorical", "continuous"]
-for i, col_list in enumerate([binary_cols, categorical_cols, continuous_cols]):
-    # Find the best k for KNN imputer by cross-validation
-    if (X_train[col_list].isna().sum().sum() != 0) &
-            (X_test[col_list].isna().sum().sum() != 0):
-        best_k, best_score=find_best_k(X_train[col_list])
-        print(
-            f"Best k for {type_list[i]} features: {best_k} with MSE {best_score}")
-
-# Best k for categorical features: 16 with MSE 0.14037063422138132
-# Best k for continuous features: 8 with MSE 0.009429490297723456
-
-# Impute the training and test sets
-X_train_categorical, X_test_categorical, mod_categorical=impute_missing(
-    X_train[categorical_cols], X_test[categorical_cols], 16)
-# Shape of training data: (129, 57)
-# Shape after dropping columns with > 30% missing values: (129, 52)
-X_train_continuous, X_test_continuous, mod_continuous=impute_missing(
-    X_train[continuous_cols], X_test[continuous_cols], 8)
-# Shape of training data: (129, 5073)
-# Shape after dropping columns with > 30% missing values: (129, 2107)
-
-# Save the imputed feature table to a file
-X_train_imputed=pd.concat([X_train[binary_cols], X_train_categorical,
-                             X_train_continuous], axis=1, ignore_index=False)
-X_test_imputed=pd.concat([X_test[binary_cols], X_test_categorical,
-                            X_test_continuous], axis=1, ignore_index=False)
-out = pd.concat([X_train_imputed, X_test_imputed], axis=0)
-out.insert(0, "ID", out.apply(lambda x: "_".join(x.name), axis=1))
-out.to_csv(
-    "data/20250403_melissa_ara_data/features/Imputed_20250403_melissa_ara_features_for_binary_clf.csv",
-    index=False, header=True)
-
-# Save the imputers to files
-joblib.dump(mod_categorical,
-            "data/20250403_melissa_ara_data/features/Imputer_categorical_20250403_melissa_ara_features_for_binary_clf.pkl")
-joblib.dump(mod_continuous,
-            "data/20250403_melissa_ara_data/features/Imputer_continuous_20250403_melissa_ara_features_for_binary_clf.pkl")
+# y_train, y_test = train_test_split(labels_df, test_size=1/10, random_state=2805,
+#                                    stratify=labels_df["binary_combined_p05"])
+skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=2805)
+for fold, (train_idx, test_idx) in enumerate(skf.split(labels_df, labels_df["binary_combined_p05"])):
+    y_train = labels_df.iloc[train_idx].copy(deep=True)
+    y_test = labels_df.iloc[test_idx].copy(deep=True)
+    X_train = X.loc[y_train.index, :].copy(deep=True)
+    X_test = X.loc[y_test.index, :].copy(deep=True)
+    #
+    labels_df_split = labels_df.copy(deep=True)
+    labels_df_split.insert(1, "dataset", labels_df_split.apply(
+        lambda x: "test" if x.name in y_test.index else "train", axis=1))
+    labels_df_split.insert(0, "ID", labels_df_split.apply(
+        lambda x: "_".join(x.name), axis=1))  # create ID column
+    labels_df_split.to_csv(
+        f"data/20250403_melissa_ara_data/corrected_data/binary_labels_from_linear_model_split{fold}.csv",
+        index=False, header=True)  # save the train-test split
+    test_instances = labels_df_split[labels_df_split["dataset"] == "test"].reset_index(
+    )
+    test_instances["ID"].to_csv(
+        "data/20250403_melissa_ara_data/corrected_data/binary_labels_from_linear_model_test_instances_split{fold}.csv",
+        index=False, header=False)  # save the test instances
+    #
+    # Determing the best k for imputing each feature type
+    type_list = ["binary", "categorical", "continuous"]
+    for i, col_list in enumerate([binary_cols, categorical_cols, continuous_cols]):
+        # Find the best k for KNN imputer by cross-validation
+        if (X_train[col_list].isna().sum().sum() != 0) & (X_test[col_list].isna().sum().sum() != 0):
+            best_k, best_score = find_best_k(X_train[col_list])
+            print(
+                f"Split {fold} - Best k for {type_list[i]} features: {best_k} with MSE {best_score}")
+    #
+    # Impute the training and test sets
+    X_train_categorical, X_test_categorical, mod_categorical = impute_missing(
+        X_train[categorical_cols], X_test[categorical_cols], 16)
+    X_train_continuous, X_test_continuous, mod_continuous = impute_missing(
+        X_train[continuous_cols], X_test[continuous_cols], 8)
+    #
+    # Save the imputed feature table to a file
+    X_train_imputed = pd.concat([X_train[binary_cols], X_train_categorical,
+                                 X_train_continuous], axis=1, ignore_index=False)
+    X_test_imputed = pd.concat([X_test[binary_cols], X_test_categorical,
+                                X_test_continuous], axis=1, ignore_index=False)
+    out = pd.concat([X_train_imputed, X_test_imputed], axis=0)
+    out.insert(0, "ID", out.apply(lambda x: "_".join(x.name), axis=1))
+    out.to_csv(
+        f"data/20250403_melissa_ara_data/features/Imputed_20250403_melissa_ara_features_for_binary_clf_split{fold}.csv",
+        index=False, header=True)
+    #
+    # Save the imputers to files
+    joblib.dump(mod_categorical,
+                f"data/20250403_melissa_ara_data/features/Imputer_categorical_20250403_melissa_ara_features_for_binary_clf_split{fold}.pkl")
+    joblib.dump(mod_continuous,
+                f"data/20250403_melissa_ara_data/features/Imputer_continuous_20250403_melissa_ara_features_for_binary_clf_split{fold}.pkl")
